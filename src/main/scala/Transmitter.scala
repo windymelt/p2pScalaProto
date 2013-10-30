@@ -8,13 +8,13 @@ import scala.concurrent.duration._
 import akka.util.Timeout
 
 /**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/08
- * Time: 2:46
- * To change this template use File | Settings | File Templates.
+ * アクター間のメッセージパッシングを同期式のメソッドとしてラッピングします。
+ * @param remote 送り宛
+ * @param selfId 差出人
  */
 class Transmitter(remote: ActorRef, selfId: idAddress) {
+
+  import scala.concurrent.ExecutionContext.Implicits.global
 
   implicit val RemoteActor = remote
   implicit val timeout = Timeout(50 seconds)
@@ -24,20 +24,23 @@ class Transmitter(remote: ActorRef, selfId: idAddress) {
   }
 
   def checkLiving: Boolean = allCatch opt {
-    Ping.!?[PingACK](RemoteActor);
+    implicit val timeout = Timeout(5 seconds)
+    scala.concurrent.Await.result((RemoteActor.ask(Ping)), 5 second)
     true
   } getOrElse false
 
-  def ping(): Option[String] = allCatch opt {
-    Ping.!?[PingACK](RemoteActor).asInstanceOf[String]
+  def ping(): Future[String] = (RemoteActor ask Ping).mapTo[PingACK] map {
+    _.id_base64
   }
 
-  def findNode(id_query: TnodeID): Future[IdAddressMessage] =
+  def findNode(id_query: TnodeID): Future[IdAddressMessage] = {
     allCatch opt {
-      RemoteActor.ask(FindNode(id_query.getBase64)).mapTo[IdAddressMessage]
+      println("finding node.")
+      val result = RemoteActor.ask(FindNode(id_query.getBase64)).mapTo[IdAddressMessage]
+      println("IdAddressMessage received")
+      result
     } getOrElse (Future.successful(IdAddressMessage(None)))
-
-  //FindNode(id_query.getBase64)[IdAddressMessage](RemoteActor).idaddress.get
+  }
 
   def findNodeShort(id_query: TnodeID)(implicit context: ActorContext): Option[idAddress] = allCatch opt {
     (RemoteActor.forward(FindNode(id_query.getBase64))).asInstanceOf[IdAddressMessage].idaddress.get
@@ -45,19 +48,11 @@ class Transmitter(remote: ActorRef, selfId: idAddress) {
 
   def amIPredecessor() = RemoteActor ! AmIPredecessor(selfId)
 
-  def yourPredecessor: Option[idAddress] = YourPredecessor.!?[IdAddressMessage](RemoteActor).idaddress //(RemoteActor !? YourPredecessor).asInstanceOf[Option[idAddress]]
+  def yourPredecessor: Future[IdAddressMessage] = (RemoteActor ? YourPredecessor).mapTo[IdAddressMessage]
 
-  def yourSuccessor: Option[idAddress] = YourSuccessor.!?[IdAddressMessage](RemoteActor).idaddress //(RemoteActor !? YourSuccessor).asInstanceOf[Option[idAddress]]
+  def yourSuccessor: Future[IdAddressMessage] = (RemoteActor ? YourSuccessor).mapTo[IdAddressMessage]
 
-  def setChunk(id: Seq[Byte], data: KVSData): Option[Seq[Byte]] = {
-    //RemoteActor.!?(SetChunk(id, data)).asInstanceOf[Option[Array[Byte]]]
-    Some(SetChunk(id, data).!?[Seq[Byte]](RemoteActor))
-  }
+  def setChunk(id: Seq[Byte], data: KVSData): Option[Seq[Byte]] = SetChunk(id, data).!?[Option[Seq[Byte]]](RemoteActor)
 
-  def getChunk(id: Seq[Byte]): Option[KVSData] = {
-    //RemoteActor.!?[Option[KVSData]](GetChunk(id))
-    GetChunk(id).!?[Option[KVSData]](RemoteActor)
-  }
-
-
+  def getChunk(id: Seq[Byte]): Option[KVSData] = GetChunk(id).!?[Option[KVSData]](RemoteActor)
 }

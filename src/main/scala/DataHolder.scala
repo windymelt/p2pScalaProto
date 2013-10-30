@@ -1,15 +1,9 @@
 package momijikawa.p2pscalaproto
 
-
-/**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/08
- * Time: 16:13
- * To change this template use File | Settings | File Templates.
- */
+/** DHTに保存するデータのラッパー */
 sealed trait KVSData
 
 final case class KVSValue(value: Stream[Byte]) extends KVSData
 
+/** データを分割保存するために必要 */
 final case class MetaData(title: String, chunkCount: BigInt, sizeByte: BigInt, digests: Stream[Seq[Byte]]) extends KVSData

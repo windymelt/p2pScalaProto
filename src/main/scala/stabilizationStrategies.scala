@@ -1,151 +1,178 @@
 package momijikawa.p2pscalaproto
 
-/**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/18
- * Time: 2:16
- * To change this template use File | Settings | File Templates.
- */
+// TODO: Stateを利用する処理を一掃し、Agentに変更せよ。次いで簡潔にできる処理をStateを利用してリファクタせよ。
+// TODO: 透過性を基準に関数を抽出してみよう
 
 import scalaz._
 import Scalaz._
 import scalaz.Ordering.GT
 import Utility.Utility.pass
+import scala.concurrent.Await
+import scala.concurrent.duration._
+import akka.agent.Agent
+import scala.concurrent.stm._
 
-
+/**
+ * ノードの安定化に用いるパターンのトレイト。
+ */
 trait stabilizationStrategy {
-  type stabilizeState = State[ChordState, stabilizationStrategy]
-  type stabilized = (ChordState, stabilizationStrategy)
-  val doStrategy: stabilizeState
+  type StateAgent = Agent[ChordState]
+  val agent: StateAgent
 
-  def apply(st: ChordState): stabilized = doStrategy.run(st)
+  def doStrategy(): stabilizationStrategy
+
+  def before(): Unit = {
+    //println(this.toString)
+  }
 }
 
-object stabilizationSuccDeadStrategy extends stabilizationStrategy {
-  // Succが死んでいるのでなんとかする。
+/**
+ * Successorが死んでるとき
+ * Successorとの通信ができないときのパターンです。まずSuccessorのリストから次のSuccessor候補を探し出し接続しようとし、
+ * 失敗した場合はPredecessorとの接続を試行しますが、失敗した場合は安定化処理を中止します。
+ * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+ */
+case class SuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
 
-
-  val recoverSuccList: State[ChordState, ChordState] = {
-    for {
-      st <- get[ChordState]
-      cleared <- put(st.copy(succList = st.succList.reverse.tail.reverse))
-      st2 <- get
-      //joined <- ChordState.join(st2.succList.reverse.head, st.stabilizer)(st2)
-      joined <- ChordState.join(st2.succList.reverse.head, st.stabilizer)
-      ret <- get[ChordState]
-    } yield ret
-  }
-
-  val joinPred: State[ChordState, ChordState] = {
-    //　簡潔に@リファクタ@する
-    val stopper = (successed: Boolean) => State[ChordState, ChordState] {
-      (st: ChordState) =>
-        successed match {
-          case true => (st, st)
-          case false =>
-            // ついに全接続が継続できなくなった
-            System.out.println("全接続経路が破綻しました。停止します")
-            (for {
-              st <- get[ChordState]
-              _ <- pass(st.stabilizer ! StopStabilize)
-              _ <- put(st.copy(succList = List[idAddress](st.selfID.get), pred = None))
-              rslt <- get[ChordState]
-            } yield rslt).run(st)
-        }
-    }
-
-    val connectPredAndJoin2: State[ChordState, ChordState] = State[ChordState, ChordState] {
-      (cs: ChordState) =>
-        cs.pred match {
-          case Some(pred) =>
-            (for {
-              joining <- ChordState.join(pred, cs.stabilizer)
-              result <- stopper(joining)
-            } yield result).run(cs)
-          case None =>
-            (cs, cs)
-        }
-    }
-
-    /*val connectPredandJoin: State[ChordState, ChordState] = // s => Option(s,a) or Option(s => s,a)
-    for {
-        cs <- get[ChordState]
-        pred <- cs.pred
-        joining <- ChordState.join(pred, cs.stabilizer)
-        joinedState <- get[ChordState]
-        result <- stopper(joining)
-        //joined <- get[ChordState] // lift
-      } yield result*/
-
-    connectPredAndJoin2
-  }
-
-  val doStrategy = State[ChordState, stabilizationStrategy] {
-    cs: ChordState =>
-      System.out.println("Successorに接続できません")
-      System.out.println("Successorを破棄")
-      cs.succList.size ?|? 1 match {
-        case GT => // succListに余裕あり
-          recoverSuccList.run(cs) match {
-            case (st: ChordState, _) => (st, stabilizationSuccDeadStrategy)
-          }
-        case _ =>
-          joinPred.run(cs) match {
-            case (st: ChordState, _) => (st, stabilizationSuccDeadStrategy)
-          }
+  /**
+   * Successorが死んでいるものとみなし、Successorのリストを再構築します。
+   * @return ストラテジを返します。
+   */
+  def doStrategy() = atomic {
+    implicit txn =>
+      super.before()
+      agent().succList.nodes.size ?|? 1 match {
+        case GT => recoverSuccList() // SuccListに余裕があるとき
+        case _ => joinPred(agent)
       }
+      this
+  }
+
+  def joinPred(agent: StateAgent): idAddress = {
+    // TODO: 簡潔にリファクタする
+    val joinedResult =
+      for {
+        pred <- agent().pred
+        joinedTrying <- ChordState.joinA(pred, agent)
+      } yield joinedTrying
+
+    joinedResult | bunkruptNode(agent)
+  }
+
+  def bunkruptNode(agent: StateAgent) = {
+    agent.await(30 second).stabilizer ! StopStabilize
+    agent send (st => st.copy(succList = NodeList(List[idAddress](st.selfID.get)), pred = None))
+    agent().selfID.get
+  }
+
+  def recoverSuccList() = {
+    agent.await(30 second)
+    agent send (st => st.copy(succList = st.succList.killNearest(st.selfID.get)))
+    ChordState.joinA(agent().succList.nearestSuccessor(agent().selfID.get), agent)
+  }
+
+}
+
+case class PreSuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+  def doStrategy() = {
+    super.before()
+    agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
+    this
   }
 }
 
-object stabilizationPreSuccDeadStrategy extends stabilizationStrategy {
-  val doStrategy = State[ChordState, stabilizationStrategy] {
-    cs: ChordState =>
-      cs.succList.last.getClient(cs.selfID.get).amIPredecessor()
-      (cs, stabilizationPreSuccDeadStrategy)
+/**
+ * 自分がSuccessorの正当なPredecessorである場合のストラテジです。
+ * Successorに対してPredecessorを確認し、変更すべきことを通知します。
+ * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+ */
+case class RightStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+  def doStrategy() = {
+    super.before()
+    agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
+    this
   }
 }
 
-object stabilizationRightStrategy extends stabilizationStrategy {
-  val doStrategy = State[ChordState, stabilizationStrategy] {
-    cs: ChordState =>
-      System.out.println("Right Strategy")
-      cs.succList.last.getClient(cs.selfID.get).amIPredecessor()
-      (cs, stabilizationRightStrategy)
-  }
-}
+/**
+ * 自分がSuccessorの正当なPredecessorではない場合のストラテジです。
+ * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
+ * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+ */
+case class GaucheStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+  def doStrategy() = atomic {
+    implicit txn =>
+      super.before()
+      val preSucc = Await.result(agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).yourPredecessor, 10 second).idaddress
 
-object stabilizationGaucheStrategy extends stabilizationStrategy {
-  val doStrategy = State[ChordState, stabilizationStrategy] {
-    (cs: ChordState) =>
-
-      val preSucc = cs.succList.last.getClient(cs.selfID.get).yourPredecessor
       preSucc match {
         case Some(v) =>
-          System.out.println("Gauche Strategy: New Successor is: " + v.getBase64)
-          //rewrite self.
-
           val renewedcs: State[ChordState, ChordState] = for {
-            _ <- modify[ChordState](_.copy(succList = List[idAddress](v)))
+            _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
             newcs <- get[ChordState]
-            _ <- pass(newcs.succList.last.getClient(newcs.selfID.get).amIPredecessor())
+            _ <- pass(newcs.succList.nearestSuccessor(newcs.selfID.get).getClient(newcs.selfID.get).amIPredecessor())
           } yield newcs
 
-
-          renewedcs.run(cs) match {
-            case (newst: ChordState, _) => (newst, stabilizationGaucheStrategy)
-          }
+          agent send renewedcs.run(agent())._1
+          this
         case None =>
-          stabilizationSuccDeadStrategy.doStrategy(cs)
+          PreSuccDeadStrategy(agent).doStrategy()
       }
   }
 }
 
-object stabilizationOKStrategy extends stabilizationStrategy {
-  val doStrategy: stabilizeState =
-    State[ChordState, stabilizationStrategy] {
-      (cs: ChordState) =>
-        println("It's all right")
-        (cs, stabilizationOKStrategy)
+/**
+ * 通常時のストラテジです。
+ * Successorを増やし、データの異動が必要な場合は転送します。
+ * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+ */
+case class NormalStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+
+  import scala.concurrent.ExecutionContext.Implicits.global
+  import scala.concurrent.Future
+
+  def doStrategy() = {
+    super.before()
+    Await.result(agent() |> increaseSuccessor >>> immigrateData, 50 second)
+    this
+  }
+
+  // TODO: Successorを増やす処理を実装すること
+  val increaseSuccessor = (cs: ChordState) => {
+    // TODO: nodelistをクラスとして分離すべき
+    val head = cs.succList.nearestSuccessor(id_self = cs.selfID.get) // assuming not null
+    val newSuccList: Option[List[idAddress]] = // monad transformer使いたいけど使い方がわからん
+      for {
+        selfid <- cs.selfID
+        succ <- Await.result(head.getClient(selfid).yourSuccessor, 10 second).idaddress
+        succc <- Await.result(succ.getClient(selfid).yourSuccessor, 10 second).idaddress
+        succcc <- Await.result(succc.getClient(selfid).yourSuccessor, 10 second).idaddress
+        succccc <- Await.result(succcc.getClient(selfid).yourSuccessor, 10 second).idaddress
+      } yield List(head, succ, succc, succcc, succccc)
+
+    newSuccList match {
+      case Some(lis) => cs.copy(succList = NodeList(lis))
+      case None => cs
     }
+  }
+
+  val immigrateData = (cs: ChordState) => Future {
+    val self = cs.selfID.get
+    val dataShouldBeMoved = cs.dataholder.filterKeys {
+      (key: Seq[Byte]) =>
+        nodeID(key.toArray).belongs_between(self).and(cs.succList.nearestSuccessor(self))
+        !TnodeID.belongs(nodeID(key.toArray), self, NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), self))
+    }
+    val movedNode = dataShouldBeMoved map {
+      (f: (Seq[Byte], KVSData)) =>
+        (f._1, Await.result(self.getClient(self).findNode(nodeID(f._1.toArray)), 50 second))
+    }
+    val moving = movedNode map {
+      (xs: (Seq[Byte], IdAddressMessage)) => xs._2.idaddress.get.getClient(self).setChunk(xs._1, dataShouldBeMoved(xs._1))
+    }
+    moving.toList.sequence match {
+      case Some(_) => cs.copy(dataholder = cs.dataholder -- dataShouldBeMoved.keys)
+      case None => cs
+    }
+  }
 }

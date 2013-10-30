@@ -8,13 +8,6 @@ import scala.reflect.ClassTag
 import scala.concurrent.duration._
 import scalaz._
 
-/**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/08
- * Time: 1:17
- * To change this template use File | Settings | File Templates.
- */
 object Utility {
 
   object Utility {
@@ -30,16 +23,7 @@ object Utility {
       }.toSeq
     }
 
-    def randomWeight(): Double = {
-      val count: Int = r.nextInt(5)
-      var a: Double = 0.0
-      for (_ <- 0 to count) {
-        a = r.nextGaussian
-      }
-      a
-    }
-
-    def tee[A, B](x: A)(f: (A) => _): A = {
+    def tee[A](x: A)(f: (A) => _): A = {
       f(x)
       x
     }
@@ -62,7 +46,7 @@ object Utility {
     }*/
 
     def !?[T: ClassTag](m: Message)(a: ActorRef): T = {
-      implicit val timeout = Timeout(5 second)
+      implicit val timeout = Timeout(50 second)
       val f: Future[T] = (a ? m).mapTo[T]
       Await.result(f, 50 second)
     }
@@ -70,6 +54,16 @@ object Utility {
     def pass[T](f: Any): State[T, Unit] = State[T, Unit] {
       (x: T) =>
         (x, Unit)
+    }
+
+    def when(condition: => Boolean)(block: => Any): Unit = if (condition) block
+
+    def when[T](condition: => Boolean)(trueBlock: => T) = new {
+      def otherwise(falseBlock: => T): T = if (condition) {
+        trueBlock
+      } else {
+        falseBlock
+      }
     }
 
     /*implicit def arrPlus(xs: Iterable[Double]) = new {

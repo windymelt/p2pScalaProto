@@ -3,187 +3,179 @@ package momijikawa.p2pscalaproto
 import scalaz._
 import Scalaz._
 import akka.actor._
-import Utility.Utility._
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.collection.immutable.HashMap
+import akka.agent.Agent
+import scala.concurrent.stm._
+import scala.util.control.Exception._
 
 /**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/13
- * Time: 20:24
- * To change this template use File | Settings | File Templates.
+ * ノードの状態の要素。
+ * このクラスがノードの持ちうる全ての情報です。
+ * @param selfID このノードのID
+ * @param succList Successorのリスト
+ * @param fingerList FingerTable
+ * @param pred Predecessor
+ * @param dataholder データの格納場所
+ * @param stabilizer 安定化処理を行なうためのタイマ
  */
 case class ChordState(
                        selfID: Option[idAddress],
-                       succList: List[idAddress],
-                       fingerList: List[idAddress],
+                       succList: NodeList,
+                       fingerList: NodeList,
                        pred: Option[idAddress],
                        dataholder: HashMap[Seq[Byte], KVSData],
-                       stabilizer: ActorRef /*,
-                       transmitter: ActorRef*/
-                       ) {
+                       stabilizer: ActorRef)
 
-  def copyS(
-             selfId: Option[idAddress] = selfID,
-             succList: List[idAddress] = succList,
-             fingerList: List[idAddress] = fingerList,
-             pred: Option[idAddress] = pred,
-             dataholder: HashMap[Seq[Byte], KVSData] = dataholder,
-             stabilizer: ActorRef = stabilizer /*,
-             transmitter: ActorRef = transmitter*/
-             ): State[ChordState, Unit] = {
-    State[ChordState, Unit]((cs) => (this.copy(selfId, succList, fingerList, pred, dataholder, stabilizer /*, transmitter*/), Unit))
-  }
-}
-
+/**
+ * [[momijikawa.p2pscalaproto.ChordState]]を変更するための静的なメソッド群。
+ */
 object ChordState {
   type dataMap = HashMap[Seq[Byte], Seq[Byte]]
   type idListT = List[idAddress]
 
+  /** [[momijikawa.p2pscalaproto.ChordState.succList]]と[[momijikawa.p2pscalaproto.ChordState.fingerList]]のどちらを処理するかの型 */
   sealed trait SL_FL
 
-  final case object SL extends SL_FL
+  case object SL extends SL_FL
 
-  final case object FL extends SL_FL
+  case object FL extends SL_FL
 
-
-  /*def dataPut(key: Array[Byte], value: Array[Byte])(cs: ChordState): State[ChordState, Array[Byte]]/*Option[Array[Byte]]*/ = {
-    case cs: ChordState => (cs.copy(dataholder = cs.dataholder.+ ((key, value))), key)
-  }*/
-
-  def dataPut(key: Seq[Byte], value: KVSData)(implicit context: ActorContext): State[ChordState, Seq[Byte]] =
-    State[ChordState, Seq[Byte]] {
-      (cs: ChordState) =>
-        context.system.log.debug("putting data into this node.")
-        (cs.copy(dataholder = cs.dataholder + ((key, value))), key)
-    }
-
-  val idListClear = (_: idListT) => List[idAddress]()
-  val idListPush = (one: idAddress) => (idl: idListT) => one :: idl
-  val idListRemove = (one: idAddress) => (idl: idListT) => idl.dropWhile(_ == one)
-
-  val idListKillhead = (idl: idListT) => idl.reverse.tail.reverse // [1,2,3] => [1,2]
-
-  def idListAct(which: SL_FL, f: idListT => idListT): State[ChordState, Unit] = State[ChordState, Unit] {
-    case cs: ChordState =>
-      which match {
-        case SL => (cs.copy(succList = f(cs.succList)), Unit)
-        case FL => (cs.copy(fingerList = f(cs.fingerList)), Unit)
-      }
-  }
-
-  val predChange: (idAddress) => State[ChordState, Unit] = (newPred: idAddress) =>
-    State[ChordState, Unit] {
-      cs: ChordState => (cs.copy(pred = Some(newPred)), Unit)
-    }
-
-  def nearestNeighbor(idl: idListT, id_query: TnodeID, id_self: TnodeID): idAddress = {
-    idl.filter(TnodeID.belongs(_, id_self, id_query)) minBy {
-      _ <-> id_query
-    }
-  }
-
-  val join: (idAddress, ActorRef) => State[ChordState, Boolean] = (connectTo: idAddress, stabilizer: ActorRef) =>
-    State[ChordState, Boolean] {
-      (cs: ChordState) =>
-        Await.result(connectTo.getClient(cs.selfID.get).findNode(cs.selfID.get), 10 second).idaddress match {
-          case Some(newsucc) =>
-            def proc: State[ChordState, Unit] = {
-              for {
-                st <- get[ChordState]
-                st2 <- st.copyS(succList = List[idAddress](newsucc), pred = None) //put[ChordState](st.copy(succList = Stack[idAddress](newsucc), pred = None))
-                _ <- pass(stabilizer ! StartStabilize)
-                _ <- pass(println("Joinに成功しました")) //pass(println("Joinに成功しました"))
-                st3 <- get[ChordState]
-              } yield st3
-            }
-
-            (proc.run(cs)._1, true)
-
-          case None =>
-            System.out.println("Selfに接続できません")
-            (cs, false)
+  /**
+   * """このノードに"""データを保管します。
+   * DHTではなくこのノードにデータを保存します。
+   * @param key キー
+   * @param value データ
+   * @param state [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+   * @return 成功した場合は[[scala.Option]]としてキーが返ります。
+   */
+  def dataPut(key: Seq[Byte], value: KVSData, state: Agent[ChordState]): Option[Seq[Byte]] =
+    atomic {
+      implicit txn =>
+        allCatch opt {
+          state send {
+            (st) => st.copy(dataholder = st.dataholder + ((key, value)))
+          }
+          key
         }
     }
 
-  /*  val findNodeCore: (ChordState) => (TnodeID) => Option[idAddress] = {
-      (cs: ChordState) =>
-        (id: TnodeID) =>
-          val id_query = id
-          val id_succ = cs.succList.last.some
-          (id_query.some |@| id_succ) {
-            _ == _
-          } match {
-            case Some(true) => cs.selfID
-            case _ =>
-              TnodeID.belongs(id_query, cs.selfID.get, id_succ.get) match {
-                case true =>
-                  val cli_succ = cs.succList.last.getClient(cs.selfID.get)
-                  cli_succ.whoAreYou
-                case false => // passing
-                  ChordState.nearestNeighbor(cs.succList ++ cs.fingerList, id_query, cs.selfID.get).getClient(cs.selfID.get).findNode(id_query)
+  /**
+   * ブートストラップを経由してDHTネットワークに参加します。
+   * このメソッドは[[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]を変更します。
+   * @param target ブートストラップとして利用するノード。
+   * @param state 参加するノードの[[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+   * @return 新たなSuccessor
+   */
+  def joinA(target: idAddress, state: Agent[ChordState]): Option[idAddress] = atomic {
+    implicit txn =>
+      for {
+        selfID <- state().selfID
+        mightBeNewSuccessor <- (allCatch opt Await.result(target.getClient(selfID).findNode(selfID), 10 second).idaddress).flatten[idAddress]
+        _ <- (state send {
+          _.copy(succList = NodeList(List[idAddress](mightBeNewSuccessor).toNel.get), pred = None)
+        }).some
+        _ <- (state().stabilizer ! StartStabilize).some
+      } yield mightBeNewSuccessor
+  }
+
+  /**
+   * あるノードIDを管轄するノードを検索します。
+   * 自分とノードIDが同じであるか、もしくは自分が担当のノードであるときは自分を示す[[momijikawa.p2pscalaproto.IdAddressMessage]]を発信者に送り返します。
+   * そうでないときは、最も近いと推定されるノードに問い合わせを転送します。
+   * @param csa 自分のノードの[[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
+   * @param id_query 検索したいノードID
+   * @param context 発信者が分かる文脈情報
+   */
+  def findNodeCoreS(csa: Agent[ChordState], id_query: TnodeID)(implicit context: ActorContext) = atomic {
+    implicit txn =>
+      val isMeAndQueryEqual = csa().selfID.get.getNodeID == id_query
+      val id_nearest: idAddress = NodeList(csa().succList.nodes.list ++ csa().fingerList.nodes.list).nearestSuccessor(id_self = csa().selfID.get)
+
+      isMeAndQueryEqual match {
+        case true =>
+          context.sender ! IdAddressMessage(idaddress = csa().selfID)
+
+        case false =>
+          val isQueryBelongsNearest = id_query belongs_between csa().selfID.get and id_nearest
+
+          isQueryBelongsNearest match {
+            case true =>
+              val cliNrst = id_nearest.getClient(selfid = csa().selfID.get)
+              val address: Option[idAddress] = (id_nearest.getNodeID == csa().selfID.get.getNodeID) match {
+                case true => csa().selfID
+                case false => cliNrst.whoAreYou
+              }
+              context.sender ! IdAddressMessage(idaddress = address)
+
+            case false =>
+              val id_nearestForwarder: idAddress = NodeList(csa().succList.nodes.list ++ csa().fingerList.nodes.list).nearestSuccessor(id_query)
+              (id_nearestForwarder.getNodeID == csa().selfID.get) match {
+                case true => context.sender ! IdAddressMessage(idaddress = csa().selfID)
+                case false => id_nearestForwarder.actorref.forward(FindNode(id_query.getBase64))
               }
           }
-    }
-  */
-  def findNodeCoreS(cs: ChordState, id_query: TnodeID)(implicit context: ActorContext) = {
-    context.system.log.debug("Received: findNodeCoreS")
-    val id_succ = cs.succList.last.some
-    (id_query.some |@| id_succ) {
-      _.getArray().deep == _.getArray().deep
-    } match {
-      case Some(true) => context.sender ! IdAddressMessage(cs.selfID)
-      case _ =>
-        TnodeID.belongs(id_query, cs.selfID.get, id_succ.get) match {
-          case true =>
-            val cli_succ = cs.succList.last.getClient(cs.selfID.get)
-            context.system.log.debug("Node found")
-            context.sender ! IdAddressMessage(cli_succ.whoAreYou)
-          case false => // passing
-            context.system.log.debug("going to forward Findnode request to nearest node.")
-            ChordState.nearestNeighbor(cs.succList ++ cs.fingerList, id_query, cs.selfID.get).getClient(cs.selfID.get).findNodeShort(id_query)
-        }
-    }
-
-  }
-
-  val yourSuccessorCore: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.succList.last.some
-
-  val yourPredecessorCore: (ChordState) => Option[idAddress] = {
-    (cs: ChordState) =>
-      cs.pred match {
-        case Some(pred) =>
-          cs.stabilizer ! StartStabilize
-          // ここで死活の確認もしたほうがいいかも
-          cs.pred
-        case None =>
-          None
       }
   }
 
   /**
-   * idAddressを受け取り、現在のPredecessorと比較し、Predecessorをより望ましい方に変更します。
+   * 現在分かる範囲における、自分に最も近いSuccessorを返します。
    */
-  val checkPredecessor = (saidIDAddress: idAddress) => State[ChordState, ChordState] {
-    (cs: ChordState) =>
+  val yourSuccessorCore: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.selfID map {
+    selfID => cs.succList.nearestSuccessor(selfID)
+  } //cs.succList.last.some
 
-      val self_said_NEQ = (cs.selfID |@| saidIDAddress.some) {
-        (_: idAddress) == /*≠*/ (_: idAddress)
-      } getOrElse false
-      val predIsNone = cs.pred.isEmpty
-      val saidBelongsBetter = TnodeID.belongs(saidIDAddress, cs.pred.get, cs.selfID.get)
-      val predIsDead = !successorStabilizationFactory.checkPredLiving(cs)
-      // このへん
-
-      self_said_NEQ ∧ (predIsNone ∨ saidBelongsBetter ∨ predIsDead) match {
-        case true =>
-          System.out.println("Predecessorに変更: " + saidIDAddress.getBase64)
-          val cs2 = cs.copy(pred = saidIDAddress.some) //Some(saidIDAddress) //monadic assist
-          (cs2, cs2)
-        case false =>
-          (cs, cs)
-      }
+  /**
+   * 自分のPredecessorを返します。
+   * @param cs 自分のノードの状態。
+   * @param context
+   * @return Predecessor
+   */
+  def yourPredecessorCore(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
+    context.system.log.debug("YourPredecessorCore")
+    cs.stabilizer ! StartStabilize
+    cs.pred
   }
+
+  /**
+   * 現在のPredecessorと比較し、最適な状態になるべく調整します。
+   * 渡された[[momijikawa.p2pscalaproto.idAddress]]と現在のPredecessorを比較し、原則として、より近い側をPredecessorとして決め、ノードの状態を更新します。
+   * また、渡されたものと自分が同じノードであるときは変更しません。
+   * また、現在のPredecessorが利用できないときには渡された[[momijikawa.p2pscalaproto.idAddress]]を受け入れます。
+   * @param address 比較対象のPredecessor。
+   * @param state 自分のノードの状態。
+   */
+  def checkPredecessor(address: idAddress, state: Agent[ChordState]) = {
+    val check: (ChordState) => Boolean =
+      (st) => allCatch.opt {
+        println("checking my predecessor")
+        // when pred is self?
+        val selfIsNotSaid = !(st.selfID.get.getNodeID == address.getNodeID)
+        val predIsNone = st.pred.isEmpty
+        val saidWorths = (st.pred map {
+          pred => address.belongs_between(pred).and(st.selfID.get)
+        }) | false // pred = Noneの場合も考慮
+        val predIsDead = !successorStabilizationFactory.checkPredLiving(st) // 副作用あり
+        println("checkpredecessor - P fetched")
+        selfIsNotSaid ∧ (predIsNone ∨ saidWorths ∨ predIsDead)
+      } | false
+
+    val execute: Boolean => (Agent[ChordState], idAddress) => Unit = {
+      case true => (agt: Agent[ChordState], addr: idAddress) => {
+        println("going to replace predecessor.")
+        agt send {
+          _.copy(pred = addr.some)
+        }
+        agt().stabilizer ! StartStabilize
+      }
+
+      case false => (_: Agent[ChordState], _: idAddress) => // do nothing
+    }
+
+    atomic {
+      implicit txn => (check >>> execute)(state())(state, address)
+    }
+  }
+
 }

@@ -6,119 +6,177 @@ import scala.collection.immutable.HashMap
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.ops._
+import akka.agent.Agent
+import scala.concurrent.stm._
 
 import scalaz._
 import Scalaz._
 
+// TODO: timer-control-actorを作るべきでは
+
 /**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/08
- * Time: 1:45
- * To change this template use File | Settings | File Templates.
+ * Chord DHTの中核部です。
+ * 高速なメッセージパッシングを処理するため、[[akka.actor.Actor]]で構成されています。
+ * 通常の利用では直接扱うことはありません。
  */
 class ChordCore extends Actor {
   type dataMap = HashMap[Seq[Byte], KVSData]
-  type idListT = List[idAddress]
 
-  var state = new ChordState(None, List(), List(), None, new HashMap[Seq[Byte], KVSData](), null)
+  val stateAgt = Agent(new ChordState(
+    None,
+    NodeList(List(idAddress(Array.fill(20)(0.toByte), self))),
+    NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), self))),
+    None,
+    new HashMap[Seq[Byte], KVSData](), null
+  ))(context.system)
+
   val log = Logging(context.system, this)
-  //val stabilizer = system.actorOf(Props[Stabilizer], "Stabilizer")
-  //val transmitter = system.actorOf(Props[Transmitter], "Transmitter")
 
+  /**
+   * 受け取ったメッセージを処理します。
+   */
   def receive = {
     case m: chordMessage => m match {
       case Stabilize => stabilize()
-      case InitNode(id) => init(id); sender ! ACK
-      case JoinNode(connectTo) => join(connectTo); sender ! ACK
+      case InitNode(id) =>
+        init(id); sender ! ACK
+      case JoinNode(connectTo) =>
+        join(connectTo); sender ! ACK
       case GetData(key) => sender ! loadData(key)
       case PutData(title, value) => sender ! saveData(title, value)
-      case x => log.error("Unknown chordMessage:" + x)
+      case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
+      case GetStatus => sender ! stateAgt()
+      case x => receiveExtension(x, sender)
     }
     case m: nodeMessage => m match {
       case Ping => sender ! PingACK
-      case WhoAreYou => sender ! IdAddressMessage(state.selfID)
+      case WhoAreYou => sender ! IdAddressMessage(stateAgt().selfID)
       //case FindNode(id: String) => sender ! findNodeAct(new nodeID(id))
-      case FindNode(id: String) => findNodeActS(new nodeID(id))
-      case AmIPredecessor(address) => ChordState.checkPredecessor(address).run(state)._1
+      case FindNode(id: String) =>
+        log.debug("chordcore: findnode from" + sender.path.toStringWithAddress(sender.path.address)); findNodeActS(new nodeID(id))
+      case AmIPredecessor(address) => ChordState.checkPredecessor(address, stateAgt)
       case YourPredecessor => sender ! yourPredecessorAct
       case YourSuccessor => sender ! yourSuccessorAct
       case SetChunk(key, kvp) =>
-        val saved = ChordState.dataPut(key, kvp).run(state)
-        state = saved._1
-        sender ! saved._2
+        val saved: Option[Seq[Byte]] = ChordState.dataPut(key, kvp, stateAgt)
+        //        state = saved._1
+        sender ! saved
       case GetChunk(key) =>
-        if (!state.dataholder.isDefinedAt(key)) {
-          log.info(s"No data for key: ${nodeID(key.toArray)} while Bank: ${state.dataholder.keys.map {
-            key => nodeID(key.toArray)
-          }.mkString("¥n")}")
+        log.debug("DHT: getchunk received.")
+        if (!stateAgt().dataholder.isDefinedAt(key)) {
+          log.info(s"No data for key: ${nodeID(key.toArray)} while Bank: ${
+            stateAgt().dataholder.keys.map {
+              key => nodeID(key.toArray)
+            }.mkString("¥n")
+          }")
         } else {
           log.debug(s"found data for ${nodeID(key.toArray)}")
         }
-        sender ! state.dataholder.get(key) //sender.!?[Array[Byte]](GetChunk(key))
-      case x => log.error("No such Message: " + x.toString)
+        sender ! stateAgt().dataholder.get(key) // => Option[KVSData] //sender.!?[Array[Byte]](GetChunk(key))
+      case x => receiveExtension(x, sender)
     }
-    case x => log.error("unknown message:" + x)
+    case x => receiveExtension(x, sender)
   }
 
+  /**
+   * 継承によりアプリケーションで拡張できるメッセージ処理部です。
+   * @param x 送られてきたメッセージ。
+   * @param sender 送信した[[akka.actor.Actor]]
+   * @param context [[akka.actor.ActorContext]]
+   */
+  def receiveExtension(x: Any, sender: ActorRef)(implicit context: ActorContext) = x match {
+    case m => log.error(s"unknown message: $m")
+  }
+
+  /**
+   * ノードを初期化します。
+   * ノード状態の自己IDならびにSuccessor、fingerlist、stabilizerを設定し、安定化処理を開始させます。
+   * @param id ノードのID
+   */
   def init(id: nodeID) = synchronized {
     implicit val executionContext = context.system.dispatchers.defaultGlobalDispatcher
+    implicit val timeout = akka.util.Timeout(5 seconds)
+
     log.info("initializing node")
-    state = state.copy(selfID = idAddress(id.bytes, self).some, succList = List(idAddress(id.bytes, self)))
-    state = state.copy(fingerList = List.fill(10)(idAddress(id.bytes, self)), stabilizer = context.system.actorOf(Props(new Stabilizer(self, Stabilize)), name = "Stabilizer"))
-    log.info("initialization successful: " + state.toString)
+
+    atomic {
+      implicit txn =>
+        stateAgt send (_.copy(selfID = idAddress(id.bytes, self).some, succList = NodeList(List(idAddress(id.bytes, self)))))
+        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, self))), stabilizer = context.actorOf(Props(new Stabilizer(self, Stabilize)), name = "Stabilizer")))
+    }
+
+    log.info("state initialized")
+
+    stateAgt.await.stabilizer ! StartStabilize
+
+    log.info("initialization successful: " + stateAgt().toString)
   }
 
-  override def preStart = {
+  override def preStart() = {
     log.debug("A ChordCore has been newed")
   }
 
   override def postRestart(reason: Throwable) = {
     log.debug(s"Restart reason: ${reason.getLocalizedMessage}")
-    preStart
+    preStart()
   }
 
-  def join(to: idAddress) = {
-    state = ChordState.join(to, state.stabilizer).run(state)._1
-  }
-
-  def ping: PingACK = PingACK(state.selfID.get.getBase64)
-
-  //private def findNodeAct(id: TnodeID): IdAddressMessage = IdAddressMessage(ChordState.findNodeCore(state)(id))
-  private def findNodeActS(id: TnodeID)(implicit context: ActorContext) = ChordState.findNodeCoreS(state, id)
-
-  private def yourSuccessorAct: IdAddressMessage = IdAddressMessage(ChordState.yourSuccessorCore(state))
-
-  private def yourPredecessorAct: IdAddressMessage = IdAddressMessage(ChordState.yourPredecessorCore(state))
-
-  private def sleepForRandom = {
-    try {
-      Thread.sleep((math.random * 100).asInstanceOf[Long])
-    } catch {
-      case e: InterruptedException => e.printStackTrace()
-    }
-  }
-
-
-  private def stabilize() = {
-    System.out.println("I am: " + state.selfID.get.getBase64)
-    System.out.println("successor is: "
-      + state.succList.last.getBase64)
-
-
-    state = successorStabilizationFactory.autoGenerate(state).apply(state)._1
-    state = fingerStabilizer.stabilize.run(state)._1
+  override def postStop() = {
+    stateAgt().stabilizer ! StopStabilize
+    // all beacon should be stopped.
+    log.debug("Chordcore has been terminated")
   }
 
   /**
-   * Predecessorが生きているかどうかを返します。
-   * @return { @see #checkSuccLiving}と同じです。
+   * DHTネットワークに参加します。
+   * @param to ブートストラップとして用いるノード。
    */
-  private def checkPredLiving(): Boolean = {
-    state.pred match {
-      case Some(v) => v.getClient(state.selfID.get).checkLiving
-      case None => false
-    }
+  def join(to: idAddress) = {
+    ChordState.joinA(to, stateAgt)
+  }
+
+  /**
+   * Pingを返します。
+   * @return Ping情報。
+   */
+  def ping: PingACK = PingACK(stateAgt().selfID.get.getBase64)
+
+  /**
+   * 所与のノードIDを管轄するノードを検索します。
+   * @param id 検索するノードID
+   * @param context 返信に必要な[[akka.actor.ActorContext]]
+   */
+  private def findNodeActS(id: TnodeID)(implicit context: ActorContext) = ChordState.findNodeCoreS(stateAgt, id)
+
+  /**
+   * Successorを[[momijikawa.p2pscalaproto.IdAddressMessage]]でラップして返します。
+   * @return Successor
+   */
+  private def yourSuccessorAct: IdAddressMessage = IdAddressMessage(ChordState.yourSuccessorCore(stateAgt()))
+
+  /**
+   * Predecessorを[[momijikawa.p2pscalaproto.IdAddressMessage]]でラップして返します。
+   * @return Predecessor
+   */
+  private def yourPredecessorAct: IdAddressMessage = {
+    log.debug("YourPredecessorAct"); IdAddressMessage(ChordState.yourPredecessorCore(stateAgt()))
+  }
+
+  /**
+   * 実際の安定化処理を行ないます。この動作は別スレッドで行なわれます。
+   */
+  private def stabilize() = spawn {
+
+    log.debug("Stabilizing stimulated")
+
+    val strategy = successorStabilizationFactory.autoGenerate(stateAgt).doStrategy()
+
+    log.debug("Strategy done: " + strategy.toString())
+
+    stateAgt send (fingerStabilizer.stabilize.run(_)._1)
+
+    log.debug("fingertable stabilized")
   }
 
   /**
@@ -129,78 +187,57 @@ class ChordCore extends Actor {
    */
   def saveData(title: String, value: Stream[Byte]): Future[Option[Seq[Byte]]] = {
     import context.dispatcher
-    log.debug("Saving data into DHT.")
-    //log.debug("state: " + state.toString)
     import java.security.MessageDigest
+
+    type ChunkID = Seq[Byte]
+    log.debug("Saving data into DHT.")
+
     val digestFactory = MessageDigest.getInstance("SHA-1")
 
-    //System.out.println(meta.toString());
-    /*
-     * for (int i = 0; i > value.length; i += 1024) { if (i + 1024 >
-     * value.length) { splitedData[i] = new String(value).substring(i, i +
-     * 1024); } else { splitedData[i] = new String(value).substring(i,
-     * value.length - 1); } }
-     */
-    val selfTransmitter: Transmitter = state.selfID.get.getClient(state.selfID.get)
+    /* ----- Begin of declaring helper functions -----*/
+    implicit val selfTransmitter: Transmitter = stateAgt().selfID.get.getClient(stateAgt().selfID.get)
     log.debug("Transmitter prepared.")
-    /*val saving: (Transmitter) => (BigInt) => (Stream[Byte]) => (Stream[Array[Byte]], BigInt) = (trans: Transmitter) => (count: BigInt) => (tail: Stream[Byte]) => {
-      tail.size match {
-        case 0 => (Stream.empty, count)
-        case _ =>
-          val separated = tail.splitAt(1024)
-          val addr: idAddress = trans.findNode(nodeID(separated._1.toArray)).getOrElse(state.selfID.get)
-          val cli = addr.getClient(state.selfID.get)
-          val digestFactory = MessageDigest.getInstance("SHA-1")
-          digestFactory.update(separated._1.toArray)
-          val digest = digestFactory.digest()
-          cli.setChunk(digest, KVSValue(separated._1.toStream))
-          val saved = saving(trans)(count + 1)(separated._2)
-          (digest #:: saved._1, saved._2)
-          saving(trans)(count + 1)(separated._2) |> {
-            (nextdig: Stream[Array[Byte]], c: BigInt) => (digest #:: nextdig, c)
-          }.tupled
-      }
-    }*/
 
+    def findNodeForChunk(id: ChunkID)(implicit selfTransmitter: Transmitter) =
+      Await.result(selfTransmitter.findNode(nodeID(id.toArray)), 50 second).idaddress | stateAgt().selfID.get
 
-    val saveStream: (Transmitter) => (Stream[Byte]) => Future[Option[Stream[Seq[Byte]]]] =
-      (trans: Transmitter) => (tail: Stream[Byte]) => Future {
-        val savedDataKeys = tail.grouped(1024).map {
-          (chunk: Stream[Byte]) =>
-            val digest = digestFactory.digest(chunk.toArray).toSeq
-            (Await.result(trans.findNode(nodeID(chunk.toArray)), 50 second).idaddress | state.selfID.get).getClient(state.selfID.get).setChunk(digest, KVSValue(chunk))
-        }.toStream
-        savedDataKeys.sequence[Option, Seq[Byte]]
-      }
-
-
-    /*for (byteData <- value.) {
-      val addr: idAddress = nd.findNode(Base64.encode(meta.checksum_Chunk_SHA1(i))).getOrElse(self)
-      val cliNode: P2PMessageClient = addr.getClient;
-      cliNode.setChunk(meta.checksum_Chunk_SHA1(i),
-        meta.chunks(i).getBytes());
-    }*/
-    val digestsOpt = saveStream(selfTransmitter)(value)
+    def saveStream(data: Stream[Byte])(implicit selfTransmitter: Transmitter): Future[Option[Stream[ChunkID]]] = Future {
+      val savedDataKeys: Stream[Option[ChunkID]] = data.grouped(1024).map {
+        (chunk: Stream[Byte]) =>
+          val digestOfChunk = digestFactory.digest(chunk.toArray).toSeq
+          findNodeForChunk(digestOfChunk).getClient(stateAgt().selfID.get)
+            .setChunk(digestOfChunk, KVSValue(chunk))
+      }.toStream
+      savedDataKeys.sequence[Option, ChunkID]
+    }
+    /* ----- End of declaring functions ----- */
+    /* ----- Beginning of renewing functions ----- */
+    val digestsOpt: Future[Option[Stream[ChunkID]]] = saveStream(value)
     log.debug("saving message has sent.")
+
+    def generateMetaData(digests: Stream[ChunkID]): MetaData = {
+      val BigZERO = BigInt(0)
+      val sizeOfValue = value.foldLeft(BigZERO)((sum: BigInt, a: Byte) => sum + 1) // Int would overflow so BigInt
+      val chunkCount = sizeOfValue.mod(1024) match {
+          case BigZERO => sizeOfValue / 1024
+          case otherwise => (sizeOfValue / 1024) + 1
+        }
+      MetaData(title, chunkCount, sizeOfValue, digests)
+    }
+
+    def saveMetadata(metaData: MetaData): Option[ChunkID] = {
+      val digestOfMetadata = digestFactory.digest(metaData.toString.getBytes)
+      val saveTarget = findNodeForChunk(digestOfMetadata).getClient(stateAgt().selfID.get)
+      saveTarget.setChunk(digestOfMetadata.toSeq, metaData)
+      digestOfMetadata.toSeq.some
+    }
+    /* ----- end of renewing functions ----- */
 
     digestsOpt map {
       _ >>= {
-        (digests: Stream[Seq[Byte]]) =>
-          val Bigzero = BigInt(0)
-          val size = value.foldLeft(Bigzero)((l: BigInt, R: Byte) => l + 1)
-          val chunkCountWithRoundup: BigInt = size.mod(1024) match {
-            case Bigzero => size / 1024
-            case _ => (size / 1024) + 1
-          }
-          val meta: MetaData = MetaData(title, chunkCountWithRoundup, size, digests)
-          log.debug("metadata has generated.")
-          digestFactory.update(meta.toString.getBytes)
-          val metaDigest = digestFactory.digest()
-          val addr: idAddress = Await.result(selfTransmitter.findNode(nodeID(metaDigest)), 30 second).idaddress | state.selfID.get
-          val cliNode = addr.getClient(state.selfID.get)
-          log.debug("Saving metadata.")
-          cliNode.setChunk(metaDigest.toSeq, meta)
-          metaDigest.toSeq.some
+        (digests: Stream[ChunkID]) =>
+          val meta = generateMetaData(digests)
+          saveMetadata(meta)
       }
     }
 
@@ -214,29 +251,32 @@ class ChordCore extends Actor {
   def loadData(key: Seq[Byte]): Future[Option[Stream[Byte]]] = {
     import context.dispatcher
     Future {
-      log.debug("Loading data from DHT.")
+      log.debug("loaddata: Loading data from DHT.")
       //log.debug("state: " + state.toString)
 
-      val nd = state.selfID.get.getClient(state.selfID.get)
-      val addr: idAddress = Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress | state.selfID.get
-      val byte_meta: Option[KVSData] = addr.getClient(state.selfID.get).getChunk(key)
-      log.debug(s"Metadata has loaded: ${byte_meta}")
+      val nd = stateAgt().selfID.get.getClient(stateAgt().selfID.get)
+      val findnodeF = nd.findNode(nodeID(key.toArray))
+      log.debug("loaddata: findnode future fetched")
+      val addr: idAddress = Await.result(findnodeF, 50 second).idaddress | stateAgt().selfID.get
+      log.debug("loaddata: findnode done.")
+      val byte_meta: Option[KVSData] = addr.getClient(stateAgt().selfID.get).getChunk(key)
+      log.debug(s"loaddata: Metadata has loaded: $byte_meta")
 
       val concat = (L: Seq[KVSValue], R: Seq[KVSValue]) => L ++ R
       val KVSValueEnsuring: (Option[KVSData]) => Option[KVSValue] =
-        (data: Option[KVSData]) =>
-          data match {
-            case Some(v) if v.isInstanceOf[KVSValue] => Some(v.asInstanceOf[KVSValue]) // 暗黙変換されるか心配
-            case Some(v) => log.error(s"Received is not Data: ${v}"); None
-            case None => log.error(s"not found"); None
-          }
+        {
+          case Some(v) if v.isInstanceOf[KVSValue] => Some(v.asInstanceOf[KVSValue]) // 暗黙変換されるか心配
+          case Some(v) =>
+            log.error(s"Received is not Data: $v"); None
+          case None => log.error(s"not found"); None
+        }
 
       val key2chunk = (key: Seq[Byte]) => // Validationの利用？
         for {
           _ <- log.debug(s"finding chunk for: ${nodeID(key.toArray).getBase64}").point[Option]
-          addr <- Tags.First(Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress) |+| Tags.First(state.selfID) // findNodeに失敗したらself
-          _ <- log.debug(s"addr for key: ${addr}").point[Option]
-          selfid <- state.selfID
+          addr <- Tags.First(Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress) |+| Tags.First(stateAgt().selfID) // findNodeに失敗したらself
+          _ <- log.debug(s"addr for key: $addr").point[Option]
+          selfid <- stateAgt().selfID
           transmitter <- addr.getClient(selfid).some
           chunk <- transmitter.getChunk(key)
         } yield chunk
@@ -255,7 +295,6 @@ class ChordCore extends Actor {
         case Some(_) => None
       }
     }
-
 
   }
 }

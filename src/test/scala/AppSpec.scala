@@ -1,5 +1,7 @@
 package momijikawa.p2pscalaproto.test
 
+// てすとのてすと
+
 import org.specs2.mutable._
 
 class AppSpec extends Specification {
@@ -25,4 +27,27 @@ class AppSpec extends Specification {
       (system == system2) must beTrue
     }
   }
+
+  "Agents" should {
+    import akka.agent.Agent
+    import akka.actor.ActorSystem
+    import scala.concurrent.duration._
+    import akka.util.Timeout
+    import scala.concurrent.stm._
+    implicit val system = ActorSystem("agentTest")
+
+    "agent normal" in {
+      val agt1 = Agent(1)
+      agt1 send (_ * 2);
+      agt1.await(1000) === 2
+    }
+
+    "agent can be passed as val" in {
+      val agt1 = Agent(1)
+      val agentMultiplier = (a: Agent[Int]) => a send (_ * 2)
+      val resultV: Int = { agentMultiplier(agt1); agt1.await(1000) }
+      resultV === 2
+    }
+  }
 }
+

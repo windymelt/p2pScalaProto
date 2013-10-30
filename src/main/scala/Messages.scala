@@ -7,18 +7,12 @@ import akka.util.Timeout
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
-/**
- * Created with IntelliJ IDEA.
- * User: qwilas
- * Date: 13/07/08
- * Time: 1:19
- * To change this template use File | Settings | File Templates.
- */
-sealed class Message {
+class Message {
+  // not sealed because of extension
   def !?[T: ClassTag](a: ActorRef): T = {
-    implicit val timeout = Timeout(5 second)
+    implicit val timeout = Timeout(50 second)
     val f: Future[T] = (a ? this).mapTo[T]
-    Await.result(f, 5 second)
+    Await.result(f, 50 second)
   }
 }
 
@@ -55,7 +49,7 @@ case object StopStabilize extends stabilizeMessage
 
 class chordMessage extends Message
 
-case object Stabilize /*Succ*/ extends chordMessage
+case object Stabilize extends chordMessage
 
 case class InitNode(id: nodeID) extends chordMessage
 
@@ -64,5 +58,9 @@ case class PutData(title: String, value: Stream[Byte]) extends chordMessage
 case class GetData(key: Seq[Byte]) extends chordMessage
 
 case class JoinNode(connectTo: idAddress) extends chordMessage
+
+case object GetStatus extends chordMessage
+
+case object Serialize extends chordMessage
 
 case object ACK extends chordMessage
