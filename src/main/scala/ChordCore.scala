@@ -47,6 +47,7 @@ class ChordCore extends Actor {
       case PutData(title, value) => sender ! saveData(title, value)
       case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
       case GetStatus => sender ! stateAgt()
+      case Finalize => finalizeNode()
       case x => receiveExtension(x, sender)
     }
     case m: nodeMessage => m match {
@@ -58,6 +59,7 @@ class ChordCore extends Actor {
       case AmIPredecessor(address) => ChordState.checkPredecessor(address, stateAgt)
       case YourPredecessor => sender ! yourPredecessorAct
       case YourSuccessor => sender ! yourSuccessorAct
+      case Immigration(data) => immigrateData(data)
       case SetChunk(key, kvp) =>
         val saved: Option[Seq[Byte]] = ChordState.dataPut(key, kvp, stateAgt)
         //        state = saved._1
@@ -177,6 +179,26 @@ class ChordCore extends Actor {
     stateAgt send (fingerStabilizer.stabilize.run(_)._1)
 
     log.debug("fingertable stabilized")
+  }
+
+  /**
+   * ノードを停止する前の処理を行ないます。
+   * 保持しているデータを最近傍のノードに転送します。
+   */
+  def finalizeNode() = {
+    val self = stateAgt().selfID.get
+    val nearest = NodeList(stateAgt().succList.nodes.list.filter(x => x != self)).nearestSuccessor(stateAgt().selfID.get).actorref
+    stateAgt().dataholder.foreach{
+      case (key: Seq[Byte], value: KVSData) => nearest ! SetChunk(key, value)
+    }
+  }
+
+  /**
+   * 他のノードからデータをまとめて受け取ります。
+   * @param data 他のノードからのデータ群。
+   */
+  def immigrateData(data: HashMap[Seq[Byte], KVSData]) = {
+    stateAgt send {st => st.copy(dataholder = st.dataholder ++: data)}
   }
 
   /**

@@ -40,6 +40,8 @@ case class PingACK(id_base64: String) extends nodeMessage
 
 case class ChankReturn(id: Seq[Byte], Value: KVSData) extends nodeMessage
 
+case class Immigration(data: scala.collection.immutable.HashMap[Seq[Byte], KVSData]) extends nodeMessage
+
 
 class stabilizeMessage extends Message
 
@@ -62,5 +64,7 @@ case class JoinNode(connectTo: idAddress) extends chordMessage
 case object GetStatus extends chordMessage
 
 case object Serialize extends chordMessage
+
+case object Finalize extends chordMessage
 
 case object ACK extends chordMessage

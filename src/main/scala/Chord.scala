@@ -85,5 +85,9 @@ class Chord {
   /**
    * ノードを停止させます。
    */
-  def close() = system.shutdown()
+  def close() = {
+    Finalize.!?(chord)
+    system.shutdown()
+    system.awaitTermination()
+  }
 }
