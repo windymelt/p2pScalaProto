@@ -27,11 +27,16 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
 
   override def toString() = {
     import akka.serialization._
-    val identifier: String = Serialization.currentTransportAddress.value match {
+    import com.typesafe.config.ConfigFactory
+
+    val config = ConfigFactory.load()
+    val hostname = config.getString("p2pakka.akka.remote.netty.hostname")
+    val port = config.getInt("p2pakka.akka.remote.netty.port")
+    /*val identifier: String = Serialization.currentTransportAddress.value match {
       case null ⇒ actorref.path.toString
       case address ⇒ actorref.path.toStringWithAddress(address)
-    }
-    nodeID(idVal).getBase64 + "\n" + identifier
+    }*/
+    nodeID(idVal).getBase64 + "\n" + s"akka://ChordCore-DHT@$hostname:$port/user/ChordCore2ch"
   }
 
   /** 新たにノードIDのみで焼き直す */
