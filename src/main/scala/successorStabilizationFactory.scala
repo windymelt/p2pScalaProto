@@ -4,8 +4,9 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.agent.Agent
 import scala.concurrent.stm._
+import akka.actor.ActorContext
 
-object successorStabilizationFactory {
+class successorStabilizationFactory(implicit context: ActorContext) {
 
   /**
    * [[momijikawa.p2pscalaproto.ChordState]]から自動的に戦略を生成します。
@@ -13,7 +14,7 @@ object successorStabilizationFactory {
    */
   def autoGenerate(agt: Agent[ChordState]) = atomic {
     implicit txn =>
-      val st = agt.await(30 second)
+      val st = Await.result(agt.future, 30 seconds)
       generate(checkSuccLiving(st), checkPreSuccLiving(st), checkRightness(st), checkConsistentness(st), agt)
   }
 

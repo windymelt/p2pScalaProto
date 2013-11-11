@@ -23,11 +23,11 @@ class Transmitter(remote: ActorRef, selfId: idAddress) {
     WhoAreYou.!?[IdAddressMessage](RemoteActor).idaddress.get
   }
 
-  def checkLiving: Boolean = allCatch opt {
+  def checkLiving: Boolean = !(remote.isTerminated) && (allCatch opt {
     implicit val timeout = Timeout(5 seconds)
     scala.concurrent.Await.result((RemoteActor.ask(Ping)), 5 second)
     true
-  } getOrElse false
+  } getOrElse false)
 
   def ping(): Future[String] = (RemoteActor ask Ping).mapTo[PingACK] map {
     _.id_base64

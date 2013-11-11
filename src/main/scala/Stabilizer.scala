@@ -9,14 +9,14 @@ import akka.event.Logging
  * @param message 安定化のトリガとなるメッセージ。
  * @param executionContext 文脈
  */
-class Stabilizer(chord: ActorRef, message: chordMessage)(implicit /*override val context: ActorContext,*/ executionContext: akka.dispatch.MessageDispatcher) extends Actor {
+class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionContext: akka.dispatch.MessageDispatcher) extends Actor {
 
   import scala.concurrent.duration._
   import akka.agent.Agent
 
   var scheduler: Cancellable = _
   val log = Logging(context.system, this)
-  val isStarted = Agent[Boolean](false)(context.system)
+  val isStarted = Agent[Boolean](false)(executionContext)
 
   /**
    * メッセージを受けると安定化タイマ開始もしくは停止のいずれかの処理を行います。

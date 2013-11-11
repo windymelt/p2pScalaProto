@@ -21,6 +21,9 @@ import Scalaz._
  * 通常の利用では直接扱うことはありません。
  */
 class ChordCore extends Actor {
+
+  import scala.concurrent.ExecutionContext.Implicits.global
+
   type dataMap = HashMap[Seq[Byte], KVSData]
 
   val stateAgt = Agent(new ChordState(
@@ -29,7 +32,7 @@ class ChordCore extends Actor {
     NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), self))),
     None,
     new HashMap[Seq[Byte], KVSData](), null
-  ))(context.system)
+  )) //(context.system.dispatcher)
 
   val log = Logging(context.system, this)
 
@@ -78,6 +81,7 @@ class ChordCore extends Actor {
         sender ! stateAgt().dataholder.get(key) // => Option[KVSData] //sender.!?[Array[Byte]](GetChunk(key))
       case x => receiveExtension(x, sender)
     }
+    case Terminated(a: ActorRef) => unregistNode(a)
     case x => receiveExtension(x, sender)
   }
 
@@ -97,7 +101,7 @@ class ChordCore extends Actor {
    * @param id ノードのID
    */
   def init(id: nodeID) = synchronized {
-    implicit val executionContext = context.system.dispatchers.defaultGlobalDispatcher
+    import scala.concurrent.ExecutionContext.Implicits.global
     implicit val timeout = akka.util.Timeout(5 seconds)
 
     log.info("initializing node")
@@ -105,12 +109,12 @@ class ChordCore extends Actor {
     atomic {
       implicit txn =>
         stateAgt send (_.copy(selfID = idAddress(id.bytes, self).some, succList = NodeList(List(idAddress(id.bytes, self)))))
-        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, self))), stabilizer = context.actorOf(Props(new Stabilizer(self, Stabilize)), name = "Stabilizer")))
+        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, self))), stabilizer = context.actorOf(Props(classOf[Stabilizer], self, Stabilize, context.dispatcher), name = "Stabilizer")))
     }
 
     log.info("state initialized")
 
-    stateAgt.await.stabilizer ! StartStabilize
+    Await.result(stateAgt.future(), 10 seconds).stabilizer ! StartStabilize
 
     log.info("initialization successful: " + stateAgt().toString)
   }
@@ -135,7 +139,10 @@ class ChordCore extends Actor {
    * @param to ブートストラップとして用いるノード。
    */
   def join(to: idAddress) = {
-    ChordState.joinA(to, stateAgt)
+    val newSucc = ChordState.joinA(to, stateAgt)
+    newSucc >>= {
+      ida => context.watch(ida.actorref).some
+    }
   }
 
   /**
@@ -162,7 +169,8 @@ class ChordCore extends Actor {
    * @return Predecessor
    */
   private def yourPredecessorAct: IdAddressMessage = {
-    log.debug("YourPredecessorAct"); IdAddressMessage(ChordState.yourPredecessorCore(stateAgt()))
+    log.debug("YourPredecessorAct");
+    IdAddressMessage(ChordState.yourPredecessorCore(stateAgt()))
   }
 
   /**
@@ -172,13 +180,29 @@ class ChordCore extends Actor {
 
     log.debug("Stabilizing stimulated")
 
-    val strategy = successorStabilizationFactory.autoGenerate(stateAgt).doStrategy()
+    val strategy = new successorStabilizationFactory().autoGenerate(stateAgt).doStrategy()
 
     log.debug("Strategy done: " + strategy.toString())
 
-    stateAgt send (fingerStabilizer.stabilize.run(_)._1)
+    stateAgt send (new fingerStabilizer(context).stabilize.run(_)._1)
 
     log.debug("fingertable stabilized")
+  }
+
+  def unregistNode(a: ActorRef) = {
+    log.debug(s"unregisting node $a")
+    stateAgt send {
+      st =>
+        st.copy(succList = NodeList(st.succList.nodes.list.filterNot(p => p.actorref == a)),
+          fingerList = NodeList(st.fingerList.nodes.list.map(p => if (p.actorref == a) (st.selfID.get) else (p))),
+          pred = st.pred >>= {
+            pr => if (pr.actorref == a) {
+              None
+            } else {
+              pr.some
+            }
+          })
+    }
   }
 
   /**
@@ -188,7 +212,7 @@ class ChordCore extends Actor {
   def finalizeNode() = {
     val self = stateAgt().selfID.get
     val nearest = NodeList(stateAgt().succList.nodes.list.filter(x => x != self)).nearestSuccessor(stateAgt().selfID.get).actorref
-    stateAgt().dataholder.foreach{
+    stateAgt().dataholder.foreach {
       case (key: Seq[Byte], value: KVSData) => nearest ! SetChunk(key, value)
     }
   }
@@ -198,7 +222,9 @@ class ChordCore extends Actor {
    * @param data 他のノードからのデータ群。
    */
   def immigrateData(data: HashMap[Seq[Byte], KVSData]) = {
-    stateAgt send {st => st.copy(dataholder = st.dataholder ++: data)}
+    stateAgt send {
+      st => st.copy(dataholder = st.dataholder ++: data)
+    }
   }
 
   /**
@@ -208,7 +234,6 @@ class ChordCore extends Actor {
    * @return 取り出す際に必要なユニークなID。
    */
   def saveData(title: String, value: Stream[Byte]): Future[Option[Seq[Byte]]] = {
-    import context.dispatcher
     import java.security.MessageDigest
 
     type ChunkID = Seq[Byte]
@@ -271,7 +296,6 @@ class ChordCore extends Actor {
    * @return データが存在する場合はSomeが、存在しない場合はNoneを返します。
    */
   def loadData(key: Seq[Byte]): Future[Option[Stream[Byte]]] = {
-    import context.dispatcher
     Future {
       log.debug("loaddata: Loading data from DHT.")
       //log.debug("state: " + state.toString)
@@ -285,13 +309,12 @@ class ChordCore extends Actor {
       log.debug(s"loaddata: Metadata has loaded: $byte_meta")
 
       val concat = (L: Seq[KVSValue], R: Seq[KVSValue]) => L ++ R
-      val KVSValueEnsuring: (Option[KVSData]) => Option[KVSValue] =
-        {
-          case Some(v) if v.isInstanceOf[KVSValue] => Some(v.asInstanceOf[KVSValue]) // 暗黙変換されるか心配
-          case Some(v) =>
-            log.error(s"Received is not Data: $v"); None
-          case None => log.error(s"not found"); None
-        }
+      val KVSValueEnsuring: (Option[KVSData]) => Option[KVSValue] = {
+        case Some(v) if v.isInstanceOf[KVSValue] => Some(v.asInstanceOf[KVSValue]) // 暗黙変換されるか心配
+        case Some(v) =>
+          log.error(s"Received is not Data: $v"); None
+        case None => log.error(s"not found"); None
+      }
 
       val key2chunk = (key: Seq[Byte]) => // Validationの利用？
         for {

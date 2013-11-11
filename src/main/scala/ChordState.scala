@@ -146,7 +146,7 @@ object ChordState {
    * @param address 比較対象のPredecessor。
    * @param state 自分のノードの状態。
    */
-  def checkPredecessor(address: idAddress, state: Agent[ChordState]) = {
+  def checkPredecessor(address: idAddress, state: Agent[ChordState])(implicit context: ActorContext) = {
     val check: (ChordState) => Boolean =
       (st) => allCatch.opt {
         println("checking my predecessor")
@@ -156,7 +156,7 @@ object ChordState {
         val saidWorths = (st.pred map {
           pred => address.belongs_between(pred).and(st.selfID.get)
         }) | false // pred = Noneの場合も考慮
-        val predIsDead = !successorStabilizationFactory.checkPredLiving(st) // 副作用あり
+        val predIsDead = !new successorStabilizationFactory().checkPredLiving(st) // 副作用あり
         println("checkpredecessor - P fetched")
         selfIsNotSaid ∧ (predIsNone ∨ saidWorths ∨ predIsDead)
       } | false
@@ -164,10 +164,12 @@ object ChordState {
     val execute: Boolean => (Agent[ChordState], idAddress) => Unit = {
       case true => (agt: Agent[ChordState], addr: idAddress) => {
         println("going to replace predecessor.")
+        agt().pred map (ida => context.unwatch(ida.actorref))
         agt send {
           _.copy(pred = addr.some)
         }
         agt().stabilizer ! StartStabilize
+        context.watch(addr.actorref)
       }
 
       case false => (_: Agent[ChordState], _: idAddress) => // do nothing

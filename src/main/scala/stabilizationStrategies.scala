@@ -11,6 +11,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.agent.Agent
 import scala.concurrent.stm._
+import akka.actor.ActorContext
 
 /**
  * ノードの安定化に用いるパターンのトレイト。
@@ -32,7 +33,7 @@ trait stabilizationStrategy {
  * 失敗した場合はPredecessorとの接続を試行しますが、失敗した場合は安定化処理を中止します。
  * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class SuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+case class SuccDeadStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
 
   /**
    * Successorが死んでいるものとみなし、Successorのリストを再構築します。
@@ -60,20 +61,21 @@ case class SuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationStrat
   }
 
   def bunkruptNode(agent: StateAgent) = {
-    agent.await(30 second).stabilizer ! StopStabilize
+    Await.result(agent.future, 30 second).stabilizer ! StopStabilize
     agent send (st => st.copy(succList = NodeList(List[idAddress](st.selfID.get)), pred = None))
     agent().selfID.get
   }
 
   def recoverSuccList() = {
-    agent.await(30 second)
+    Await.result(agent.future, 30 second)
+    context.unwatch(agent().succList.nearestSuccessor(agent().selfID.get).actorref)
     agent send (st => st.copy(succList = st.succList.killNearest(st.selfID.get)))
     ChordState.joinA(agent().succList.nearestSuccessor(agent().selfID.get), agent)
   }
 
 }
 
-case class PreSuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+case class PreSuccDeadStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
   def doStrategy() = {
     super.before()
     agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
@@ -86,7 +88,7 @@ case class PreSuccDeadStrategy(agent: Agent[ChordState]) extends stabilizationSt
  * Successorに対してPredecessorを確認し、変更すべきことを通知します。
  * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class RightStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+case class RightStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
   def doStrategy() = {
     super.before()
     agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
@@ -99,7 +101,7 @@ case class RightStrategy(agent: Agent[ChordState]) extends stabilizationStrategy
  * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
  * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class GaucheStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+case class GaucheStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
   def doStrategy() = atomic {
     implicit txn =>
       super.before()
@@ -108,9 +110,11 @@ case class GaucheStrategy(agent: Agent[ChordState]) extends stabilizationStrateg
       preSucc match {
         case Some(v) =>
           val renewedcs: State[ChordState, ChordState] = for {
+            _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => context.unwatch(ida.actorref)))
             _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
             newcs <- get[ChordState]
             _ <- pass(newcs.succList.nearestSuccessor(newcs.selfID.get).getClient(newcs.selfID.get).amIPredecessor())
+            _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => context.watch(ida.actorref)))
           } yield newcs
 
           agent send renewedcs.run(agent())._1
@@ -126,14 +130,14 @@ case class GaucheStrategy(agent: Agent[ChordState]) extends stabilizationStrateg
  * Successorを増やし、データの異動が必要な場合は転送します。
  * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class NormalStrategy(agent: Agent[ChordState]) extends stabilizationStrategy {
+case class NormalStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
 
   import scala.concurrent.ExecutionContext.Implicits.global
   import scala.concurrent.Future
 
   def doStrategy() = {
     super.before()
-    Await.result(agent() |> increaseSuccessor >>> immigrateData, 50 second)
+    Await.result(agent() |> increaseSuccessor >>> watchRegistNodes >>> immigrateData, 50 second)
     this
   }
 
@@ -154,6 +158,11 @@ case class NormalStrategy(agent: Agent[ChordState]) extends stabilizationStrateg
       case Some(lis) => cs.copy(succList = NodeList(lis))
       case None => cs
     }
+  }
+
+  val watchRegistNodes = (cs: ChordState) => {
+    cs.succList.nodes.list.foreach(ida => context.watch(ida.actorref))
+    cs
   }
 
   val immigrateData = (cs: ChordState) => Future {

@@ -30,13 +30,13 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
     import com.typesafe.config.ConfigFactory
 
     val config = ConfigFactory.load()
-    val hostname = config.getString("p2pakka.akka.remote.netty.hostname")
-    val port = config.getInt("p2pakka.akka.remote.netty.port")
+    val hostname = config.getString("p2pakka.akka.remote.netty.tcp.hostname")
+    val port = config.getInt("p2pakka.akka.remote.netty.tcp.port")
     /*val identifier: String = Serialization.currentTransportAddress.value match {
       case null ⇒ actorref.path.toString
       case address ⇒ actorref.path.toStringWithAddress(address)
     }*/
-    nodeID(idVal).getBase64 + "\n" + s"akka://ChordCore-DHT@$hostname:$port/user/ChordCore2ch"
+    nodeID(idVal).getBase64 + "\n" + s"akka.tcp://ChordCore-DHT@$hostname:$port/user/ChordCore2ch"
   }
 
   /** 新たにノードIDのみで焼き直す */

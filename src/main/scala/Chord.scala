@@ -1,6 +1,6 @@
 package momijikawa.p2pscalaproto
 
-import akka.actor.{Props, ActorSystem}
+import akka.actor.{ActorRef, Props, ActorSystem}
 import com.sun.org.apache.xml.internal.security.utils.Base64
 import com.typesafe.config.ConfigFactory
 
@@ -10,10 +10,11 @@ class Chord {
 
   val config = ConfigFactory.load()
   val customConf = config.getConfig("p2pakka").withFallback({
-    println("fallbacking"); config
+    println("fallbacking");
+    config
   })
   val system = ActorSystem("ChordCore-DHT", ConfigFactory.load(customConf))
-  val chord = system.actorOf(Props[ChordCore], "ChordCore")
+  val chord = system.actorOf(Props(classOf[ChordCore]), "ChordCore")
 
   /**
    * DHTを初期化します。
@@ -65,9 +66,15 @@ class Chord {
    * @param str レファレンス文字列。
    * @return 了承したら[[momijikawa.p2pscalaproto.ACK]]が返ります。
    */
-  def join(str: String): ACK.type = {
+  def join(str: String): Future[ACK.type] = {
+    import scala.concurrent.duration._
+    import scala.concurrent.ExecutionContext.Implicits.global
+
     val spr = str.split("\n")
-    join(idAddress(Base64.decode(spr(0)), system.actorFor(spr(1))))
+    val actorF = system.actorSelection(spr(1)).resolveOne(50 seconds)
+    actorF flatMap {
+      (a: ActorRef) => Future(join(idAddress(Base64.decode(spr(0)), a)))
+    }
   }
 
   /**
