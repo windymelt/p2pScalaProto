@@ -22,7 +22,22 @@ class Chord {
    * @param id 仮想空間上でのノードの位置情報
    * @return 返答があると[[momijikawa.p2pscalaproto.ACK]]を返します。
    */
-  def init(id: nodeID) = InitNode(id).!?[ACK.type](chord)
+  def init(id: nodeID) = {
+    import concurrent.duration._
+
+    val exp = customConf.getInt("akka.remote.netty.tcp.port")
+    val inp = exp
+    val uOpener = new UPnPOpener(exp, inp, "TCP", "P2PScalaProto", 1 hour)(system.log)
+
+    system.log.debug(s"opening port [$exp]...")
+    if (uOpener.open) {
+      system.log.debug(s"UPnP port opened: $exp")
+    } else {
+      system.log.warning(s"UPnP port open failed: $exp")
+    }
+
+    InitNode(id).!?[ACK.type](chord)
+  }
 
   /**
    * DHTにデータを投入します。
