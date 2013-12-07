@@ -47,10 +47,10 @@ class TnodeIDSpec extends Specification {
     }
 
     "左向き距離が正しく計算できる" in {
-      TnodeID.leftArrowDistance(candidacy = id_0, target = id_1000) must_== BigInt(1000)
-      TnodeID.leftArrowDistance(candidacy = id_1000, target = id_0) must_== OMEGA - BigInt(1000)
-      TnodeID.leftArrowDistance(candidacy = id_1000, target = id_100000) must_== BigInt(99000)
-      TnodeID.leftArrowDistance(candidacy = id_100000, target = id_1000) must_== OMEGA - BigInt(99000)
+      TnodeID.leftArrowDistance(to = id_0, from = id_1000) must_== BigInt(1000)
+      TnodeID.leftArrowDistance(to = id_1000, from = id_0) must_== OMEGA - BigInt(1000)
+      TnodeID.leftArrowDistance(to = id_1000, from = id_100000) must_== BigInt(99000)
+      TnodeID.leftArrowDistance(to = id_100000, from = id_1000) must_== OMEGA - BigInt(99000)
     }
 
     "←構文を利用した左向き計算ができる" in {

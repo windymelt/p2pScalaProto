@@ -50,7 +50,7 @@ class ChordCore extends Actor {
       case PutData(title, value) => sender ! saveData(title, value)
       case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
       case GetStatus => sender ! stateAgt()
-      case Finalize => finalizeNode()
+      case Finalize => sender ! finalizeNode()
       case x => receiveExtension(x, sender)
     }
     case m: nodeMessage => m match {
@@ -129,7 +129,6 @@ class ChordCore extends Actor {
   }
 
   override def postStop() = {
-    stateAgt().stabilizer ! StopStabilize
     // all beacon should be stopped.
     log.debug("Chordcore has been terminated")
   }
@@ -177,7 +176,6 @@ class ChordCore extends Actor {
    * 実際の安定化処理を行ないます。この動作は別スレッドで行なわれます。
    */
   private def stabilize() = spawn {
-
     log.debug("Stabilizing stimulated")
 
     val strategy = new successorStabilizationFactory().autoGenerate(stateAgt).doStrategy()
@@ -209,11 +207,25 @@ class ChordCore extends Actor {
    * ノードを停止する前の処理を行ないます。
    * 保持しているデータを最近傍のノードに転送します。
    */
-  def finalizeNode() = {
+  def finalizeNode(): ACK.type = {
+    import util.control.Exception._
+
     val self = stateAgt().selfID.get
-    val nearest = NodeList(stateAgt().succList.nodes.list.filter(x => x != self)).nearestSuccessor(stateAgt().selfID.get).actorref
-    stateAgt().dataholder.foreach {
-      case (key: Seq[Byte], value: KVSData) => nearest ! SetChunk(key, value)
+    val nearest = allCatch opt NodeList(stateAgt().succList.nodes.list.filterNot(x => x == self)).nearestSuccessor(stateAgt().selfID.get).actorref
+
+    nearest match {
+      case Some(nrst) =>
+        context.system.log.info("stopping stabilizer...")
+        stateAgt().stabilizer ! StopStabilize
+        context.system.log.info("transferring data to other nodes...")
+        stateAgt().dataholder.foreach {
+          case (key: Seq[Byte], value: KVSData) => SetChunk(key, value).!?[Option[Seq[Byte]]](nrst)
+        }
+        context.system.log.info("transferring complete.")
+        ACK
+      case None =>
+        stateAgt().stabilizer ! StopStabilize
+        ACK
     }
   }
 
