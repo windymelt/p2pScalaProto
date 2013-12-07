@@ -128,14 +128,14 @@ object TnodeID {
   /**
    * ノード間の左向きに限った距離を算出します。
    * 左右が重要になるのでcandidacyとtargetは交換不可。
-   * @param candidacy 計算の終点
-   * @param target 計算の始点
+   * @param to 計算の終点
+   * @param from 計算の始点
    * @return 左向き距離
    */
-  def leftArrowDistance(candidacy: TnodeID, target: TnodeID): BigInt = {
+  def leftArrowDistance(to: TnodeID, from: TnodeID): BigInt = {
     val Ω = BigInt.apply(2).pow(160)
-    val c = bigIntFrom(candidacy)
-    val τ = bigIntFrom(target);
+    val c = bigIntFrom(to)
+    val τ = bigIntFrom(from);
     {
       Ω + (τ - c)
     }.mod(Ω)

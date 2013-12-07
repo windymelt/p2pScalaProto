@@ -2,6 +2,7 @@ package momijikawa.p2pscalaproto
 
 // TODO: Stateを利用する処理を一掃し、Agentに変更せよ。次いで簡潔にできる処理をStateを利用してリファクタせよ。
 // TODO: 透過性を基準に関数を抽出してみよう
+// TODO: Pred死亡時の処理？
 
 import scalaz._
 import Scalaz._
@@ -117,6 +118,7 @@ case class GaucheStrategy(agent: Agent[ChordState])(implicit context: ActorConte
             _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => context.watch(ida.actorref)))
           } yield newcs
 
+          context.watch(v.actorref)
           agent send renewedcs.run(agent())._1
           this
         case None =>
@@ -137,26 +139,25 @@ case class NormalStrategy(agent: Agent[ChordState])(implicit context: ActorConte
 
   def doStrategy() = {
     super.before()
-    Await.result(agent() |> increaseSuccessor >>> watchRegistNodes >>> immigrateData, 50 second)
+    agent send Await.result(agent() |> increaseSuccessor >>> watchRegistNodes >>> immigrateData, 50 second)
     this
   }
 
-  // TODO: Successorを増やす処理を実装すること
   val increaseSuccessor = (cs: ChordState) => {
-    // TODO: nodelistをクラスとして分離すべき
-    val head = cs.succList.nearestSuccessor(id_self = cs.selfID.get) // assuming not null
-    val newSuccList: Option[List[idAddress]] = // monad transformer使いたいけど使い方がわからん
-      for {
-        selfid <- cs.selfID
-        succ <- Await.result(head.getClient(selfid).yourSuccessor, 10 second).idaddress
-        succc <- Await.result(succ.getClient(selfid).yourSuccessor, 10 second).idaddress
-        succcc <- Await.result(succc.getClient(selfid).yourSuccessor, 10 second).idaddress
-        succccc <- Await.result(succcc.getClient(selfid).yourSuccessor, 10 second).idaddress
-      } yield List(head, succ, succc, succcc, succccc)
+    context.system.log.debug("going to add successor")
+
+    val succ = cs.succList.nearestSuccessor(id_self = cs.selfID.get) // assuming not null
+    val newSuccList: Option[List[idAddress]] = cs.selfID >>= {
+        selfid =>
+          Utility.failableRecursiveList[idAddress](ida => Await.result(ida.getClient(selfid).yourSuccessor, 10 second).idaddress, Some(succ), 4)
+      }
 
     newSuccList match {
-      case Some(lis) => cs.copy(succList = NodeList(lis))
-      case None => cs
+      case Some(lis) =>
+        cs.copy(succList = NodeList(lis))
+      case None => {
+        context.system.log.warning("failed to increase successor"); cs
+      }
     }
   }
 

@@ -166,6 +166,7 @@ object ChordState {
         println("going to replace predecessor.")
         agt().pred map (ida => context.unwatch(ida.actorref))
         agt send {
+          // TODO: Succ==selfの場合、Succも置き変える必要がある？
           _.copy(pred = addr.some)
         }
         agt().stabilizer ! StartStabilize

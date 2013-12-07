@@ -2,7 +2,7 @@ name := "P2PScalaProto"
 
 organization := "momijikawa"
 
-version := "0.2.6"
+version := "0.2.7"
 
 scalaVersion := "2.10.2"
 
@@ -26,5 +26,7 @@ libraryDependencies ++= Seq(
 initialCommands := "import momijikawa.p2pscalaproto._"
 
 initialCommands in console := "import scalaz._, Scalaz._"
+
+// Specify publish directory with your environment.
 
 publishTo := Some(Resolver.file("p2p2ch",file(Path.userHome.absolutePath+"/Documents/programme/repo"))(Patterns(true, Resolver.mavenStyleBasePattern)))

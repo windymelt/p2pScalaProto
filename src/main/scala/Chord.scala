@@ -111,7 +111,7 @@ class Chord {
    * ノードを停止させます。
    */
   def close() = {
-    Finalize.!?(chord)
+    Finalize.!?[ACK.type](chord)
     system.shutdown()
     system.awaitTermination()
     if (uOpener != null) {

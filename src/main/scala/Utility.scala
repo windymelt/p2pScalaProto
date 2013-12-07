@@ -86,4 +86,23 @@ object Utility {
 */
   }
 
+  def failableRecursiveList[A](function: A => Option[A], initial: Option[A], times: Int): Option[List[A]] = {
+    def internalRecursive(answer: A, function: A => Option[A], times: Int): List[A] = {
+      times match {
+        case 0 => Nil
+        case n if n < 0 => Nil
+        case n =>
+          function(answer) match {
+            case None => Nil
+            case Some(sth) => sth :: internalRecursive(sth, function, n - 1)
+          }
+      }
+    }
+
+    initial match {
+      case None => None
+      case Some(sth) => Some(sth :: internalRecursive(sth, function, times - 1))
+    }
+  }
+
 }

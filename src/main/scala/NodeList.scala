@@ -21,7 +21,7 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
    * @return 最近傍のSuccessor
    */
   def nearestSuccessor(id_self: TnodeID): idAddress =
-    nodes.list.minBy(TnodeID.leftArrowDistance(id_self, _))
+    nodes.list.minBy(ida => TnodeID.leftArrowDistance(to = id_self, from = ida))
 
   /**
    * 所与の番号のノード情報を削除した[[momijikawa.p2pscalaproto.NodeList]]を返します。
