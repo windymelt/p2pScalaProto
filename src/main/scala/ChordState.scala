@@ -154,7 +154,7 @@ object ChordState {
         val selfIsNotSaid = !(st.selfID.get.getNodeID == address.getNodeID)
         val predIsNone = st.pred.isEmpty
         val saidWorths = (st.pred map {
-          pred => address.belongs_between(pred).and(st.selfID.get)
+          pred => address.belongs_between(pred).and(st.selfID.get) || st.selfID.get == pred
         }) | false // pred = Noneの場合も考慮
         val predIsDead = !new successorStabilizationFactory().checkPredLiving(st) // 副作用あり
         println("checkpredecessor - P fetched")

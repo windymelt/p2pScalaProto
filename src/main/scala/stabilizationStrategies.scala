@@ -71,7 +71,7 @@ case class SuccDeadStrategy(agent: Agent[ChordState])(implicit context: ActorCon
     Await.result(agent.future, 30 second)
     context.unwatch(agent().succList.nearestSuccessor(agent().selfID.get).actorref)
     agent send (st => st.copy(succList = st.succList.killNearest(st.selfID.get)))
-    ChordState.joinA(agent().succList.nearestSuccessor(agent().selfID.get), agent)
+    ChordState.joinA(agent().succList.nearestSuccessor(agent().selfID.get), agent) // TODO: predも使用できる
   }
 
 }
@@ -156,7 +156,8 @@ case class NormalStrategy(agent: Agent[ChordState])(implicit context: ActorConte
       case Some(lis) =>
         cs.copy(succList = NodeList(lis))
       case None => {
-        context.system.log.warning("failed to increase successor"); cs
+        context.system.log.warning("failed to increase successor");
+        cs
       }
     }
   }

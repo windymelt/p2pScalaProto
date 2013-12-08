@@ -140,8 +140,12 @@ class ChordCore extends Actor {
   def join(to: idAddress) = {
     val newSucc = ChordState.joinA(to, stateAgt)
     newSucc >>= {
-      ida => context.watch(ida.actorref).some
+      ida =>
+        context.watch(ida.actorref)
+        ida.getClient(stateAgt().selfID.get).amIPredecessor()
+        true.some
     }
+    // TODO: 即座にamIPredecessorを実行すべき？(fixed)
   }
 
   /**

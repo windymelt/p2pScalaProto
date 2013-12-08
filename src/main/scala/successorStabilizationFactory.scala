@@ -42,6 +42,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       RightStrategy(agent)
     } else {
       // Successorとpre-successorとの間に入れない場合
+      // TODO: Gaucheになる基準がゆるすぎる。なぜかすぐにsuccessorがpredecessorに変異してしまう。
       GaucheStrategy(agent)
     }
   }
@@ -55,11 +56,13 @@ class successorStabilizationFactory(implicit context: ActorContext) {
     try {
       state.succList.nearestSuccessor(id_self = state.selfID.get) match {
         case nrst if nrst.getNodeID == state.selfID.get.getNodeID => true
-        case nrst if nrst.a.isTerminated => false
+        // case nrst if nrst.a.isTerminated => false // deleted deprecated
         case nrst => nrst.getClient(state.selfID.get).checkLiving
       }
     } catch {
-      case _: Exception => false
+      case e: Exception =>
+        context.system.log.warning(e.getLocalizedMessage)
+        false
     }
   }
 
@@ -73,7 +76,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
         case None => false
         case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => true
-        case Some(preNext) if preNext.a.isTerminated => false
+        // case Some(preNext) if preNext.a.isTerminated => false
         case Some(preNext) => preNext.getClient(state.selfID.get).checkLiving
 
       }
@@ -91,7 +94,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       case Some(v) =>
         v match {
           case ida if ida.getNodeID == state.selfID.get.getNodeID => true
-          case ida if ida.a.isTerminated => false
+          // case ida if ida.a.isTerminated => false
           case ida => ida.getClient(state.selfID.get).checkLiving
         }
       case None => false
@@ -103,14 +106,19 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * @return 入れるならtrueを、入れないもしくは自分のSuccessorが自分自身の場合falseを返します。
    */
   def checkRightness(state: ChordState): Boolean = {
-    val Succ: idAddress = state.succList.nearestSuccessor(id_self = state.selfID.get)
-
-    state.selfID.get.getNodeID == Succ.getNodeID match {
-      case true => false // 自分が孤独状態ならすぐに譲る
-      case false =>
-        Await.result(Succ.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress match {
-          case None => true
-          case Some(preSucc) => state.selfID.get.belongs_between(preSucc).and(Succ)
+    val SuccNotMe: List[idAddress] = state.succList.nodes.list.filterNot(_ == state.selfID.get)
+    SuccNotMe match {
+      case lis if lis isEmpty => false
+      case lis =>
+        val Succ: idAddress = NodeList(lis).nearestSuccessor(id_self = state.selfID.get)
+        // TODO: nearest == selfのとき？ (fixed)
+        state.selfID.get.getNodeID == Succ.getNodeID match {
+          case true => false // 自分が孤独状態ならすぐに譲る
+          case false =>
+            Await.result(Succ.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress match {
+              case None => true
+              case Some(preSucc) => state.selfID.get.belongs_between(preSucc).and(Succ) || Succ == preSucc
+            }
         }
     }
   }
@@ -123,7 +131,9 @@ class successorStabilizationFactory(implicit context: ActorContext) {
     val preSucc: Option[idAddress] = Await.result(state.succList.nearestSuccessor(id_self = state.selfID.get).getClient(state.selfID.get).yourPredecessor, 10 second).idaddress
     preSucc match {
       case None => false
-      case Some(pSucc) => state.selfID.get.getNodeID == pSucc.getNodeID
+      case Some(pSucc) =>
+        context.system.log.debug(s"checkConsistentness: (${state.selfID.get.getNodeID},${pSucc.getNodeID}})")
+        state.selfID.get.getNodeID == pSucc.getNodeID
     }
   }
 }
