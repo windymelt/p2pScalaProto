@@ -5,7 +5,7 @@ import akka.actor._
 import akka.agent.Agent
 
 
-class MessageHandler(stateAgt: Agent[ChordState], implicit val context: ActorContext, log: LoggingAdapter) {
+class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorContext, log: LoggingAdapter) {
 
   import scalaz._
   import Scalaz._

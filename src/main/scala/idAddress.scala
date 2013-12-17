@@ -39,8 +39,22 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
     nodeID(idVal).getBase64 + "\n" + s"akka.tcp://ChordCore-DHT@$hostname:$port/user/ChordCore2ch"
   }
 
+
   /** 新たにノードIDのみで焼き直す */
   def getNodeID: nodeID = nodeID(id)
+}
+
+object idAddress {
+
+  def fromString(str: String)(implicit system: ActorSystem): idAddress = {
+    import scala.concurrent.duration._
+    import scala.concurrent.Await
+
+    val spr = str.split("\n")
+    val actorF = system.actorSelection(spr(1)).resolveOne(50 seconds)
+    idAddress(Base64.decode(spr(0)), Await.result(actorF, 10 second))
+  }
+
 }
 
 trait TActorRef {

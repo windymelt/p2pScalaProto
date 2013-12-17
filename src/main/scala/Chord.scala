@@ -97,14 +97,8 @@ class Chord {
    * @return 了承したら[[momijikawa.p2pscalaproto.ACK]]が返ります。
    */
   def join(str: String): Future[ACK.type] = {
-    import scala.concurrent.duration._
     import scala.concurrent.ExecutionContext.Implicits.global
-
-    val spr = str.split("\n")
-    val actorF = system.actorSelection(spr(1)).resolveOne(50 seconds)
-    actorF flatMap {
-      (a: ActorRef) => Future(join(idAddress(Base64.decode(spr(0)), a)))
-    }
+    Future(join(idAddress.fromString(str)))
   }
 
   /**
