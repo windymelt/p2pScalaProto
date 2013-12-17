@@ -19,14 +19,14 @@ class Chord {
     config
   })
   val system = ActorSystem("ChordCore-DHT", ConfigFactory.load(customConf))
-  val stateAgt = Agent(new ChordState(
+  val receiver = system.actorOf(Props(classOf[MessageReceiver], stateAgt), "MessageReceiver")
+  val stateAgt: Agent[ChordState] = Agent(new ChordState(
     None,
     NodeList(List(idAddress(Array.fill(20)(0.toByte), receiver))),
     NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), receiver))),
     None,
     new HashMap[Seq[Byte], KVSData](), null
-  ))
-  val receiver = system.actorOf(Props(classOf[MessageReceiver], stateAgt), "MessageReceiver")
+  ))(system.dispatcher)
   var uOpener: UPnPOpener = null
 
   /**

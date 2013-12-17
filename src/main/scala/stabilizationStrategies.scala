@@ -66,8 +66,8 @@ case class SuccDeadStrategy(implicit context: ActorContext) extends stabilizatio
 
       joinedResult match {
         case Some((c, None)) => bunkruptNode(c)
-        case Some((c, _)) => // do nothing
-        case None => // do nothing
+        case Some((c, _)) => c // do nothing
+        case None => cs // do nothing
       }
     }
 
@@ -135,7 +135,7 @@ case class GaucheStrategy(implicit context: ActorContext) extends stabilizationS
                 _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => unwatch(ida)))
                 _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
                 newcs <- get[ChordState]
-                _ <- tellAmIPredecessor(newcs.succList.nearestSuccessor(newcs.selfID.get), newcs.selfID.get).pure
+                _ <- Utility.Utility.pass(tellAmIPredecessor(newcs.succList.nearestSuccessor(newcs.selfID.get), newcs.selfID.get))
                 _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => watch(ida)))
               } yield newcs
 
@@ -157,7 +157,6 @@ case class GaucheStrategy(implicit context: ActorContext) extends stabilizationS
 /**
  * 通常時のストラテジです。
  * Successorを増やし、データの異動が必要な場合は転送します。
- * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
 case class NormalStrategy(implicit context: ActorContext) extends stabilizationStrategy {
 
@@ -224,7 +223,7 @@ case class NormalStrategy(implicit context: ActorContext) extends stabilizationS
     }
   }
 
-  def moveChunk(toMove: Map[Seq[Byte], KVSData], self: idAddress)(key: Seq[Byte], idam: IdAddressMessage): Option[Seq[Byte]] = {
+  val moveChunk = (toMove: Map[Seq[Byte], KVSData], self: idAddress) => (key: Seq[Byte], idam: IdAddressMessage) => {
     idam.idaddress.get.getClient(self).setChunk(key, toMove(key))
   }
 }

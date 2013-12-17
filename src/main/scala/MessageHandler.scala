@@ -5,7 +5,7 @@ import akka.actor._
 import akka.agent.Agent
 
 
-class MessageHandler(stateAgt: Agent[ChordState], context: ActorContext, log: LoggingAdapter) {
+class MessageHandler(stateAgt: Agent[ChordState], implicit val context: ActorContext, log: LoggingAdapter) {
 
   import scalaz._
   import Scalaz._
@@ -19,6 +19,7 @@ class MessageHandler(stateAgt: Agent[ChordState], context: ActorContext, log: Lo
   val watcher = new NodeWatcher(context)
   val stabilizerFactory = new StabilizerFactory(context)
   val fingerStabilizer = new FingerStabilizer(watcher)
+  implicit val dispatcher = context.dispatcher
 
   /**
    * ノードを初期化します。
