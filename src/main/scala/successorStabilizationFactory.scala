@@ -6,11 +6,11 @@ import akka.agent.Agent
 import scala.concurrent.stm._
 import akka.actor.ActorContext
 
+// TODO: 副作用を切り出してテストしやすくする
 class successorStabilizationFactory(implicit context: ActorContext) {
 
   /**
    * [[momijikawa.p2pscalaproto.ChordState]]から自動的に戦略を生成します。
-   * このメソッドはトランザクショナルです。
    */
   def autoGenerate(st: ChordState) = atomic {
     implicit txn =>
@@ -26,7 +26,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * @return 実行すべき戦略。
    */
   def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean) = {
-    println("generator working")
+
     if (succdead) {
       // Successorが死んでる
       SuccDeadStrategy
@@ -47,9 +47,9 @@ class successorStabilizationFactory(implicit context: ActorContext) {
   }
 
   /**
-   * Successorが生きているかどうかを返します。
+   * Successorが死んでいるかどうかを返します。
    * @param state ChordState
-   * @return 生きて（いるtrue/いないfalse）
+   * @return 死んで（いるtrue/いないfalse）
    */
   def isSuccDead(state: ChordState): Boolean = {
     try {

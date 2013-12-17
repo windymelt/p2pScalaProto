@@ -55,6 +55,11 @@ trait TActorRef {
 case class nodeID(bytes: Array[Byte]) extends TnodeID {
   override val idVal = bytes
 
+  override def equals(obj: Any) = obj match {
+    case nodeID(that) => bytes.deep == that.deep
+    case _ => false
+  }
+
   def this(str: String) = this(Base64.decode(str))
 }
 
