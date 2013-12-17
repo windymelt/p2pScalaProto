@@ -28,19 +28,19 @@ object Utility {
       x
     }
 
-    /*implicit class actorRefExtension(val a: ActorRef) extends AnyVal {
+    /*implicit class actorRefExtension(val receiver: ActorRef) extends AnyVal {
       def !?[T: ClassTag](m: Message) = {
         //val c = implicitly[ClassTag[T]]
         implicit val timeout = Timeout(5 second)
-        val f: Future[T] = (a ? m).mapTo[T]
+        val f: Future[T] = (receiver ? m).mapTo[T]
         Await.result(f, 5 second)
       }
     }*/
-    /*implicit def callAndResponse(a: ActorRef) = new {
+    /*implicit def callAndResponse(receiver: ActorRef) = new {
       def !?[T: ClassTag](m: Message) = {
         //val c = implicitly[ClassTag[T]]
         implicit val timeout = Timeout(5 second)
-        val f: Future[T] = (a ? m).mapTo[T]
+        val f: Future[T] = (receiver ? m).mapTo[T]
         Await.result(f, 5 second)
       }
     }*/

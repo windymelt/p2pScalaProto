@@ -26,7 +26,12 @@ case class ChordState(
                        fingerList: NodeList,
                        pred: Option[idAddress],
                        dataholder: HashMap[Seq[Byte], KVSData],
-                       stabilizer: ActorRef)
+                       stabilizer: ActorRef
+                       ) {
+  def dropNode(a: ActorRef): ChordState = {
+    this.copy(selfID, succList.remove(a), fingerList.replace(a, selfID.get), pred.flatMap((i) => if (i.a == a) None else i.some), dataholder, stabilizer)
+  }
+}
 
 /**
  * [[momijikawa.p2pscalaproto.ChordState]]を変更するための静的なメソッド群。
@@ -50,7 +55,7 @@ object ChordState {
    * @param state [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
    * @return 成功した場合は[[scala.Option]]としてキーが返ります。
    */
-  def dataPut(key: Seq[Byte], value: KVSData, state: Agent[ChordState]): Option[Seq[Byte]] =
+  def putDataToNode(key: Seq[Byte], value: KVSData, state: Agent[ChordState]): Option[Seq[Byte]] =
     atomic {
       implicit txn =>
         allCatch opt {
@@ -68,7 +73,7 @@ object ChordState {
    * @param state 参加するノードの[[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
    * @return 新たなSuccessor
    */
-  def joinA(target: idAddress, state: Agent[ChordState]): Option[idAddress] = atomic {
+  def joinNetwork(target: idAddress, state: Agent[ChordState]): Option[idAddress] = atomic {
     implicit txn =>
       for {
         selfID <- state().selfID
@@ -80,6 +85,24 @@ object ChordState {
       } yield mightBeNewSuccessor
   }
 
+  val joinNetworkS: idAddress => State[ChordState, Option[idAddress]] = (target: idAddress) =>
+    State[ChordState, Option[idAddress]] {
+      cs => {
+        for {
+          sid <- cs.selfID
+          newSucc <- (allCatch opt findSelf(target, sid)).flatten[idAddress]
+          newState <- regenerateState(cs, newSucc).some
+          _ <- startStabilize(newState).some
+        } yield (newState, newSucc.some)
+      } |(cs, None)
+    }
+
+  private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getClient(sid).findNode(sid), 10 second).idaddress
+
+  private def regenerateState(cs: ChordState, newSucc: idAddress): ChordState = cs.copy(succList = NodeList(List[idAddress](newSucc).toNel.get), pred = None)
+
+  private def startStabilize(cs: ChordState): Unit = cs.stabilizer ! StartStabilize
+
   /**
    * あるノードIDを管轄するノードを検索します。
    * 自分とノードIDが同じであるか、もしくは自分が担当のノードであるときは自分を示す[[momijikawa.p2pscalaproto.IdAddressMessage]]を発信者に送り返します。
@@ -88,7 +111,7 @@ object ChordState {
    * @param id_query 検索したいノードID
    * @param context 発信者が分かる文脈情報
    */
-  def findNodeCoreS(csa: Agent[ChordState], id_query: TnodeID)(implicit context: ActorContext) = atomic {
+  def findNode(csa: Agent[ChordState], id_query: TnodeID)(implicit context: ActorContext) = atomic {
     implicit txn =>
       val isMeAndQueryEqual = csa().selfID.get.getNodeID == id_query
       val id_nearest: idAddress = NodeList(csa().succList.nodes.list ++ csa().fingerList.nodes.list).nearestSuccessor(id_self = csa().selfID.get)
@@ -122,7 +145,7 @@ object ChordState {
   /**
    * 現在分かる範囲における、自分に最も近いSuccessorを返します。
    */
-  val yourSuccessorCore: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.selfID map {
+  val yourSuccessor: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.selfID map {
     selfID => cs.succList.nearestSuccessor(selfID)
   } //cs.succList.last.some
 
@@ -132,7 +155,7 @@ object ChordState {
    * @param context
    * @return Predecessor
    */
-  def yourPredecessorCore(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
+  def yourPredecessor(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
     context.system.log.debug("YourPredecessorCore")
     cs.stabilizer ! StartStabilize
     cs.pred
@@ -156,7 +179,7 @@ object ChordState {
         val saidWorths = (st.pred map {
           pred => address.belongs_between(pred).and(st.selfID.get) || st.selfID.get == pred
         }) | false // pred = Noneの場合も考慮
-        val predIsDead = !new successorStabilizationFactory().checkPredLiving(st) // 副作用あり
+        val predIsDead = !new successorStabilizationFactory().isPredLiving(st) // 副作用あり
         println("checkpredecessor - P fetched")
         selfIsNotSaid ∧ (predIsNone ∨ saidWorths ∨ predIsDead)
       } | false

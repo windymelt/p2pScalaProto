@@ -1,106 +1,31 @@
 package momijikawa.p2pscalaproto
 
+import akka.event.LoggingAdapter
 import akka.actor._
-import akka.event.Logging
-import scala.collection.immutable.HashMap
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import scala.concurrent.Future
-import scala.concurrent.ops._
 import akka.agent.Agent
-import scala.concurrent.stm._
 
-import scalaz._
-import Scalaz._
 
-// TODO: timer-control-actorを作るべきでは
+class MessageHandler(stateAgt: Agent[ChordState], context: ActorContext, log: LoggingAdapter) {
 
-/**
- * Chord DHTの中核部です。
- * 高速なメッセージパッシングを処理するため、[[akka.actor.Actor]]で構成されています。
- * 通常の利用では直接扱うことはありません。
- */
-class ChordCore extends Actor {
+  import scalaz._
+  import Scalaz._
+  import scala.collection.immutable.HashMap
+  import scala.concurrent.Await
+  import scala.concurrent.duration._
+  import scala.concurrent.Future
+  import scala.concurrent.ops._
+  import scala.concurrent.stm._
 
-  import scala.concurrent.ExecutionContext.Implicits.global
-
-  type dataMap = HashMap[Seq[Byte], KVSData]
-
-  val stateAgt = Agent(new ChordState(
-    None,
-    NodeList(List(idAddress(Array.fill(20)(0.toByte), self))),
-    NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), self))),
-    None,
-    new HashMap[Seq[Byte], KVSData](), null
-  )) //(context.system.dispatcher)
-
-  val log = Logging(context.system, this)
-
-  /**
-   * 受け取ったメッセージを処理します。
-   */
-  def receive = {
-    case m: chordMessage => m match {
-      case Stabilize => stabilize()
-      case InitNode(id) =>
-        init(id); sender ! ACK
-      case JoinNode(connectTo) =>
-        join(connectTo); sender ! ACK
-      case GetData(key) => sender ! loadData(key)
-      case PutData(title, value) => sender ! saveData(title, value)
-      case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
-      case GetStatus => sender ! stateAgt()
-      case Finalize => sender ! finalizeNode()
-      case x => receiveExtension(x, sender)
-    }
-    case m: nodeMessage => m match {
-      case Ping => sender ! PingACK
-      case WhoAreYou => sender ! IdAddressMessage(stateAgt().selfID)
-      //case FindNode(id: String) => sender ! findNodeAct(new nodeID(id))
-      case FindNode(id: String) =>
-        log.debug("chordcore: findnode from" + sender.path.toStringWithAddress(sender.path.address)); findNodeActS(new nodeID(id))
-      case AmIPredecessor(address) => ChordState.checkPredecessor(address, stateAgt)
-      case YourPredecessor => sender ! yourPredecessorAct
-      case YourSuccessor => sender ! yourSuccessorAct
-      case Immigration(data) => immigrateData(data)
-      case SetChunk(key, kvp) =>
-        val saved: Option[Seq[Byte]] = ChordState.dataPut(key, kvp, stateAgt)
-        //        state = saved._1
-        sender ! saved
-      case GetChunk(key) =>
-        log.debug("DHT: getchunk received.")
-        if (!stateAgt().dataholder.isDefinedAt(key)) {
-          log.info(s"No data for key: ${nodeID(key.toArray)} while Bank: ${
-            stateAgt().dataholder.keys.map {
-              key => nodeID(key.toArray)
-            }.mkString("¥n")
-          }")
-        } else {
-          log.debug(s"found data for ${nodeID(key.toArray)}")
-        }
-        sender ! stateAgt().dataholder.get(key) // => Option[KVSData] //sender.!?[Array[Byte]](GetChunk(key))
-      case x => receiveExtension(x, sender)
-    }
-    case Terminated(a: ActorRef) => unregistNode(a)
-    case x => receiveExtension(x, sender)
-  }
-
-  /**
-   * 継承によりアプリケーションで拡張できるメッセージ処理部です。
-   * @param x 送られてきたメッセージ。
-   * @param sender 送信した[[akka.actor.Actor]]
-   * @param context [[akka.actor.ActorContext]]
-   */
-  def receiveExtension(x: Any, sender: ActorRef)(implicit context: ActorContext) = x match {
-    case m => log.error(s"unknown message: $m")
-  }
+  val watcher = new NodeWatcher(context)
+  val stabilizerFactory = new StabilizerFactory(context)
+  val fingerStabilizer = new FingerStabilizer(watcher)
 
   /**
    * ノードを初期化します。
    * ノード状態の自己IDならびにSuccessor、fingerlist、stabilizerを設定し、安定化処理を開始させます。
    * @param id ノードのID
    */
-  def init(id: nodeID) = synchronized {
+  def init(id: nodeID, receiver: ActorRef) = synchronized {
     import scala.concurrent.ExecutionContext.Implicits.global
     implicit val timeout = akka.util.Timeout(5 seconds)
 
@@ -108,8 +33,8 @@ class ChordCore extends Actor {
 
     atomic {
       implicit txn =>
-        stateAgt send (_.copy(selfID = idAddress(id.bytes, self).some, succList = NodeList(List(idAddress(id.bytes, self)))))
-        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, self))), stabilizer = context.actorOf(Props(classOf[Stabilizer], self, Stabilize, context.dispatcher), name = "Stabilizer")))
+        stateAgt send (_.copy(selfID = idAddress(id.bytes, receiver).some, succList = NodeList(List(idAddress(id.bytes, receiver)))))
+        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, receiver))), stabilizer = stabilizerFactory.generate(receiver)))
     }
 
     log.info("state initialized")
@@ -119,33 +44,18 @@ class ChordCore extends Actor {
     log.info("initialization successful: " + stateAgt().toString)
   }
 
-  override def preStart() = {
-    log.debug("A ChordCore has been newed")
-  }
-
-  override def postRestart(reason: Throwable) = {
-    log.debug(s"Restart reason: ${reason.getLocalizedMessage}")
-    preStart()
-  }
-
-  override def postStop() = {
-    // all beacon should be stopped.
-    log.debug("Chordcore has been terminated")
-  }
-
   /**
    * DHTネットワークに参加します。
    * @param to ブートストラップとして用いるノード。
    */
   def join(to: idAddress) = {
-    val newSucc = ChordState.joinA(to, stateAgt)
+    val newSucc = ChordState.joinNetwork(to, stateAgt)
     newSucc >>= {
       ida =>
-        context.watch(ida.actorref)
+        watcher.watch(ida.actorref)
         ida.getClient(stateAgt().selfID.get).amIPredecessor()
         true.some
     }
-    // TODO: 即座にamIPredecessorを実行すべき？(fixed)
   }
 
   /**
@@ -157,53 +67,39 @@ class ChordCore extends Actor {
   /**
    * 所与のノードIDを管轄するノードを検索します。
    * @param id 検索するノードID
-   * @param context 返信に必要な[[akka.actor.ActorContext]]
    */
-  private def findNodeActS(id: TnodeID)(implicit context: ActorContext) = ChordState.findNodeCoreS(stateAgt, id)
+  def findNode(id: TnodeID) = ChordState.findNode(stateAgt, id)
 
   /**
    * Successorを[[momijikawa.p2pscalaproto.IdAddressMessage]]でラップして返します。
    * @return Successor
    */
-  private def yourSuccessorAct: IdAddressMessage = IdAddressMessage(ChordState.yourSuccessorCore(stateAgt()))
+  def yourSuccessor: IdAddressMessage = IdAddressMessage(ChordState.yourSuccessor(stateAgt()))
 
   /**
    * Predecessorを[[momijikawa.p2pscalaproto.IdAddressMessage]]でラップして返します。
    * @return Predecessor
    */
-  private def yourPredecessorAct: IdAddressMessage = {
-    log.debug("YourPredecessorAct");
-    IdAddressMessage(ChordState.yourPredecessorCore(stateAgt()))
+  def yourPredecessor: IdAddressMessage = {
+    log.debug("YourPredecessor")
+    IdAddressMessage(ChordState.yourPredecessor(stateAgt()))
   }
 
   /**
    * 実際の安定化処理を行ないます。この動作は別スレッドで行なわれます。
    */
-  private def stabilize() = spawn {
+  def stabilize() = spawn {
     log.debug("Stabilizing stimulated")
-
-    val strategy = new successorStabilizationFactory().autoGenerate(stateAgt).doStrategy()
-
+    val strategy = new successorStabilizationFactory().autoGenerate(stateAgt())
     log.debug("Strategy done: " + strategy.toString())
-
-    stateAgt send (new fingerStabilizer(context).stabilize.run(_)._1)
-
+    stateAgt send fingerStabilizer.stabilize
     log.debug("fingertable stabilized")
   }
 
   def unregistNode(a: ActorRef) = {
     log.debug(s"unregisting node $a")
     stateAgt send {
-      st =>
-        st.copy(succList = NodeList(st.succList.nodes.list.filterNot(p => p.actorref == a)),
-          fingerList = NodeList(st.fingerList.nodes.list.map(p => if (p.actorref == a) (st.selfID.get) else (p))),
-          pred = st.pred >>= {
-            pr => if (pr.actorref == a) {
-              None
-            } else {
-              pr.some
-            }
-          })
+      _.dropNode(a)
     }
   }
 
@@ -219,13 +115,13 @@ class ChordCore extends Actor {
 
     nearest match {
       case Some(nrst) =>
-        context.system.log.info("stopping stabilizer...")
+        log.info("stopping stabilizer...")
         stateAgt().stabilizer ! StopStabilize
-        context.system.log.info("transferring data to other nodes...")
+        log.info("transferring data to other nodes...")
         stateAgt().dataholder.foreach {
           case (key: Seq[Byte], value: KVSData) => SetChunk(key, value).!?[Option[Seq[Byte]]](nrst)
         }
-        context.system.log.info("transferring complete.")
+        log.info("transferring complete.")
         ACK
       case None =>
         stateAgt().stabilizer ! StopStabilize
@@ -358,4 +254,5 @@ class ChordCore extends Actor {
     }
 
   }
+
 }

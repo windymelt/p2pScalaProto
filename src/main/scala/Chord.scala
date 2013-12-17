@@ -3,8 +3,13 @@ package momijikawa.p2pscalaproto
 import akka.actor.{ActorRef, Props, ActorSystem}
 import com.sun.org.apache.xml.internal.security.utils.Base64
 import com.typesafe.config.ConfigFactory
+import akka.agent.Agent
+import scala.collection.immutable.HashMap
+
 
 class Chord {
+
+  type dataMap = HashMap[Seq[Byte], Seq[Byte]]
 
   import scala.concurrent.Future
 
@@ -14,7 +19,14 @@ class Chord {
     config
   })
   val system = ActorSystem("ChordCore-DHT", ConfigFactory.load(customConf))
-  val chord = system.actorOf(Props(classOf[ChordCore]), "ChordCore")
+  val stateAgt = Agent(new ChordState(
+    None,
+    NodeList(List(idAddress(Array.fill(20)(0.toByte), receiver))),
+    NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), receiver))),
+    None,
+    new HashMap[Seq[Byte], KVSData](), null
+  ))
+  val receiver = system.actorOf(Props(classOf[MessageReceiver], stateAgt), "MessageReceiver")
   var uOpener: UPnPOpener = null
 
   /**
@@ -39,7 +51,7 @@ class Chord {
       }
     }
 
-    InitNode(id).!?[ACK.type](chord)
+    InitNode(id).!?[ACK.type](receiver)
   }
 
   /**
@@ -52,7 +64,7 @@ class Chord {
   def put(title: String, value: Stream[Byte]): Future[Option[Seq[Byte]]] = {
     //chord.!?[Option[Array[Byte]]](PutData(title, value))
     system.log.debug("chord: put called")
-    val result: Future[Option[Seq[Byte]]] = PutData(title, value).!?[Future[Option[Seq[Byte]]]](chord)
+    val result: Future[Option[Seq[Byte]]] = PutData(title, value).!?[Future[Option[Seq[Byte]]]](receiver)
     system.log.debug("chord: put done")
     result
   }
@@ -66,7 +78,7 @@ class Chord {
   def get(key: Seq[Byte]): Future[Option[Stream[Byte]]] = {
     //chord.!?[Option[Stream[Byte]]](GetData(key))
     system.log.debug("chord: get called")
-    val result = GetData(key).!?[Future[Option[Stream[Byte]]]](chord)
+    val result = GetData(key).!?[Future[Option[Stream[Byte]]]](receiver)
     system.log.debug("chord: get done")
     result
   }
@@ -77,7 +89,7 @@ class Chord {
    * @param ida 接続の踏み台(bootstrap)に使うノード。このノードを経由して自動的にネットワーク上の位置が決定します。
    * @return 了承したら[[momijikawa.p2pscalaproto.ACK]]が返ります。
    */
-  def join(ida: idAddress) = JoinNode(ida).!?[ACK.type](chord)
+  def join(ida: idAddress) = JoinNode(ida).!?[ACK.type](receiver)
 
   /**
    * レファレンス文字列を用いてDHT空間に参加します。シュガーシンタックスです。
@@ -99,19 +111,19 @@ class Chord {
    * [[momijikawa.p2pscalaproto.Chord.join( S t r i n g )]]で必要となるレファレンス文字列を返します。
    * @return レファレンス文字列。
    */
-  def getReference = Serialize.!?[Option[String]](chord)
+  def getReference = Serialize.!?[Option[String]](receiver)
 
   /**
    * 現在のノードの情報を返します。
    * @return 生のデータ。
    */
-  def getStatus: ChordState = GetStatus.!?[ChordState](chord)
+  def getStatus: ChordState = GetStatus.!?[ChordState](receiver)
 
   /**
    * ノードを停止させます。
    */
   def close() = {
-    Finalize.!?[ACK.type](chord)
+    Finalize.!?[ACK.type](receiver)
     system.shutdown()
     system.awaitTermination()
     if (uOpener != null) {

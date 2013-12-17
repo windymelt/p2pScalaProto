@@ -7,7 +7,6 @@ package momijikawa.p2pscalaproto
 import scalaz._
 import Scalaz._
 import scalaz.Ordering.GT
-import Utility.Utility.pass
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.agent.Agent
@@ -18,113 +17,141 @@ import akka.actor.ActorContext
  * ノードの安定化に用いるパターンのトレイト。
  */
 trait stabilizationStrategy {
-  type StateAgent = Agent[ChordState]
-  val agent: StateAgent
 
-  def doStrategy(): stabilizationStrategy
+  val doStrategy: State[ChordState, stabilizationStrategy]
 
   def before(): Unit = {
     //println(this.toString)
   }
+
+  def tellAmIPredecessor(ida: idAddress, self: idAddress): Unit = ida.getClient(self).amIPredecessor()
+
+  def watch(ida: idAddress)(implicit context: ActorContext): Unit = context.watch(ida.a)
+
+  def unwatch(ida: idAddress)(implicit context: ActorContext): Unit = context.unwatch(ida.a)
 }
 
 /**
  * Successorが死んでるとき
  * Successorとの通信ができないときのパターンです。まずSuccessorのリストから次のSuccessor候補を探し出し接続しようとし、
  * 失敗した場合はPredecessorとの接続を試行しますが、失敗した場合は安定化処理を中止します。
- * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class SuccDeadStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
+case class SuccDeadStrategy(implicit context: ActorContext) extends stabilizationStrategy {
 
   /**
    * Successorが死んでいるものとみなし、Successorのリストを再構築します。
    * @return ストラテジを返します。
    */
-  def doStrategy() = atomic {
-    implicit txn =>
-      super.before()
-      agent().succList.nodes.size ?|? 1 match {
-        case GT => recoverSuccList() // SuccListに余裕があるとき
-        case _ => joinPred(agent)
+  val doStrategy = State[ChordState, stabilizationStrategy] {
+    cs =>
+      atomic {
+        implicit txn =>
+          super.before()
+          val newcs = cs.succList.nodes.size ?|? 1 match {
+            case GT => recoverSuccList(cs) // SuccListに余裕があるとき
+            case _ => joinPred(cs)
+          }
+          (newcs, this)
       }
-      this
   }
 
-  def joinPred(agent: StateAgent): idAddress = {
-    // TODO: 簡潔にリファクタする
-    val joinedResult =
-      for {
-        pred <- agent().pred
-        joinedTrying <- ChordState.joinA(pred, agent)
-      } yield joinedTrying
+  val joinPred: (ChordState) => ChordState =
+    (cs: ChordState) => {
+      // TODO: 簡潔にリファクタする
+      val joinedResult =
+        for {
+          pred <- cs.pred
+          joinedTrying <- Some(joinNetwork(cs, pred))
+        } yield joinedTrying
 
-    joinedResult | bunkruptNode(agent)
+      joinedResult match {
+        case Some((c, None)) => bunkruptNode(c)
+        case Some((c, _)) => // do nothing
+        case None => // do nothing
+      }
+    }
+
+  def bunkruptNode(cs: ChordState): ChordState = {
+    stopStabilize(cs)
+    cs.copy(succList = NodeList(List[idAddress](cs.selfID.get)), pred = None)
   }
 
-  def bunkruptNode(agent: StateAgent) = {
-    Await.result(agent.future, 30 second).stabilizer ! StopStabilize
-    agent send (st => st.copy(succList = NodeList(List[idAddress](st.selfID.get)), pred = None))
-    agent().selfID.get
+  def recoverSuccList(cs: ChordState): ChordState = {
+    unwatch(cs.succList.nearestSuccessor(cs.selfID.get))
+    val newState = cs.copy(succList = cs.succList.killNearest(cs.selfID.get))
+    joinNetwork(newState, newState.succList.nearestSuccessor(newState.selfID.get))._1 // TODO: predも使用できる
   }
 
-  def recoverSuccList() = {
-    Await.result(agent.future, 30 second)
-    context.unwatch(agent().succList.nearestSuccessor(agent().selfID.get).actorref)
-    agent send (st => st.copy(succList = st.succList.killNearest(st.selfID.get)))
-    ChordState.joinA(agent().succList.nearestSuccessor(agent().selfID.get), agent) // TODO: predも使用できる
-  }
+  def stopStabilize(cs: ChordState) = cs.stabilizer ! StopStabilize
 
+  def joinNetwork(cs: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(cs)
 }
 
-case class PreSuccDeadStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
-  def doStrategy() = {
-    super.before()
-    agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
-    this
+case class PreSuccDeadStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+  val doStrategy = State[ChordState, stabilizationStrategy] {
+    cs =>
+      super.before()
+      cs.selfID >>= {
+        self =>
+          tellAmIPredecessor(cs.succList.nearestSuccessor(self), self).some
+      }
+      (cs, this)
   }
+
+
 }
 
 /**
  * 自分がSuccessorの正当なPredecessorである場合のストラテジです。
  * Successorに対してPredecessorを確認し、変更すべきことを通知します。
- * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class RightStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
-  def doStrategy() = {
-    super.before()
-    agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).amIPredecessor()
-    this
+case class RightStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+  val doStrategy = State[ChordState, stabilizationStrategy] {
+    cs =>
+      super.before()
+      cs.selfID >>= {
+        self =>
+          tellAmIPredecessor(cs.succList.nearestSuccessor(self), self).some
+      }
+      (cs, this)
   }
 }
 
 /**
  * 自分がSuccessorの正当なPredecessorではない場合のストラテジです。
  * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
- * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class GaucheStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
-  def doStrategy() = atomic {
-    implicit txn =>
-      super.before()
-      val preSucc = Await.result(agent().succList.nearestSuccessor(agent().selfID.get).getClient(agent().selfID.get).yourPredecessor, 10 second).idaddress
+case class GaucheStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+  val doStrategy = State[ChordState, stabilizationStrategy] {
+    cs =>
+      atomic {
+        implicit txn =>
+          super.before()
+          val preSucc = getPreSucc(cs)
 
-      preSucc match {
-        case Some(v) =>
-          val renewedcs: State[ChordState, ChordState] = for {
-            _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => context.unwatch(ida.actorref)))
-            _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
-            newcs <- get[ChordState]
-            _ <- pass(newcs.succList.nearestSuccessor(newcs.selfID.get).getClient(newcs.selfID.get).amIPredecessor())
-            _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => context.watch(ida.actorref)))
-          } yield newcs
+          preSucc match {
+            case Some(v) =>
+              val renewedcs: State[ChordState, ChordState] = for {
+                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => unwatch(ida)))
+                _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
+                newcs <- get[ChordState]
+                _ <- tellAmIPredecessor(newcs.succList.nearestSuccessor(newcs.selfID.get), newcs.selfID.get).pure
+                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => watch(ida)))
+              } yield newcs
 
-          context.watch(v.actorref)
-          agent send renewedcs.run(agent())._1
-          this
-        case None =>
-          PreSuccDeadStrategy(agent).doStrategy()
+              watch(v)
+              (renewedcs.run(cs)._1, this)
+
+            case None =>
+              new PreSuccDeadStrategy().doStrategy(cs)
+          }
       }
   }
+
+  def getPreSucc(cs: ChordState): Option[idAddress] = {
+    Await.result(cs.succList.nearestSuccessor(cs.selfID.get).getClient(cs.selfID.get).yourPredecessor, 10 second).idaddress
+  }
+
 }
 
 /**
@@ -132,15 +159,16 @@ case class GaucheStrategy(agent: Agent[ChordState])(implicit context: ActorConte
  * Successorを増やし、データの異動が必要な場合は転送します。
  * @param agent [[momijikawa.p2pscalaproto.ChordState]]の[[akka.agent.Agent]]
  */
-case class NormalStrategy(agent: Agent[ChordState])(implicit context: ActorContext) extends stabilizationStrategy {
+case class NormalStrategy(implicit context: ActorContext) extends stabilizationStrategy {
 
   import scala.concurrent.ExecutionContext.Implicits.global
-  import scala.concurrent.Future
 
-  def doStrategy() = {
-    super.before()
-    agent send Await.result(agent() |> increaseSuccessor >>> watchRegistNodes >>> immigrateData, 50 second)
-    this
+  val doStrategy = State[ChordState, stabilizationStrategy] {
+    cs =>
+      super.before()
+      val newcs = cs |> increaseSuccessor >>> watchRegistNodes >>> immigrateData
+
+      (newcs, this)
   }
 
   val increaseSuccessor = (cs: ChordState) => {
@@ -163,27 +191,40 @@ case class NormalStrategy(agent: Agent[ChordState])(implicit context: ActorConte
   }
 
   val watchRegistNodes = (cs: ChordState) => {
-    cs.succList.nodes.list.foreach(ida => context.watch(ida.actorref))
+    cs.succList.nodes.list.foreach(ida => watch(ida))
     cs
   }
 
-  val immigrateData = (cs: ChordState) => Future {
-    val self = cs.selfID.get
-    val dataShouldBeMoved = cs.dataholder.filterKeys {
-      (key: Seq[Byte]) =>
-        nodeID(key.toArray).belongs_between(self).and(cs.succList.nearestSuccessor(self))
-        !TnodeID.belongs(nodeID(key.toArray), self, NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), self))
+  val immigrateData = (cs: ChordState) => {
+    cs.selfID >>= {
+      self =>
+        val dataShouldBeMoved = listUpToMove(cs)
+        val recipientNode = findContainerNode(self, dataShouldBeMoved)
+        val moving = recipientNode map moveChunk(dataShouldBeMoved, self).tupled
+
+        moving.toList.sequence match {
+          case Some(_) => cs.copy(dataholder = cs.dataholder -- dataShouldBeMoved.keys).some
+          case None => cs.some
+        }
     }
-    val movedNode = dataShouldBeMoved map {
+  } | cs
+
+  def listUpToMove(cs: ChordState): Map[Seq[Byte], KVSData] = {
+    cs.dataholder.filterKeys {
+      (key: Seq[Byte]) =>
+        nodeID(key.toArray).belongs_between(cs.selfID.get).and(cs.succList.nearestSuccessor(cs.selfID.get)) ||
+          !nodeID(key.toArray).belongs_between(cs.selfID.get).and(NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), cs.selfID.get))
+    }
+  }
+
+  def findContainerNode(self: idAddress, map: Map[Seq[Byte], KVSData]): Map[Seq[Byte], IdAddressMessage] = {
+    map map {
       (f: (Seq[Byte], KVSData)) =>
         (f._1, Await.result(self.getClient(self).findNode(nodeID(f._1.toArray)), 50 second))
     }
-    val moving = movedNode map {
-      (xs: (Seq[Byte], IdAddressMessage)) => xs._2.idaddress.get.getClient(self).setChunk(xs._1, dataShouldBeMoved(xs._1))
-    }
-    moving.toList.sequence match {
-      case Some(_) => cs.copy(dataholder = cs.dataholder -- dataShouldBeMoved.keys)
-      case None => cs
-    }
+  }
+
+  def moveChunk(toMove: Map[Seq[Byte], KVSData], self: idAddress)(key: Seq[Byte], idam: IdAddressMessage): Option[Seq[Byte]] = {
+    idam.idaddress.get.getClient(self).setChunk(key, toMove(key))
   }
 }

@@ -1,5 +1,7 @@
 package momijikawa.p2pscalaproto
 
+import akka.actor.ActorRef
+
 case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
   /**
    * 所与のノードIDに最も近いものを返します。
@@ -29,6 +31,10 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
    * @return 所与のノードが削除された[[momijikawa.p2pscalaproto.NodeList]]
    */
   def remove(index: Int): NodeList = NodeList(nodes.list.take(index) ++ nodes.list.drop(index + 1))
+
+  def remove(a: ActorRef): NodeList = NodeList(nodes.list.filterNot((i) => i.a == a))
+
+  def replace(from: ActorRef, to: idAddress) = NodeList(nodes.list.map(p => if (p.a == from) to else p))
 
   /**
    * 所与のノードIDに最も近いノードを削除した[[momijikawa.p2pscalaproto.NodeList]]を返します。

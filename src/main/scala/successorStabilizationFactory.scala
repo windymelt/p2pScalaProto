@@ -12,38 +12,37 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * [[momijikawa.p2pscalaproto.ChordState]]から自動的に戦略を生成します。
    * このメソッドはトランザクショナルです。
    */
-  def autoGenerate(agt: Agent[ChordState]) = atomic {
+  def autoGenerate(st: ChordState) = atomic {
     implicit txn =>
-      val st = Await.result(agt.future, 30 seconds)
-      generate(checkSuccLiving(st), checkPreSuccLiving(st), checkRightness(st), checkConsistentness(st), agt)
+      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st))
   }
 
   /**
    * 条件を元に[[momijikawa.p2pscalaproto.stabilizationStrategy]]を返します。
-   * @param succliving Successorが生きているかどうか
-   * @param presuccliving SuccessorのPredecessorが生きているか
+   * @param succdead Successorが死んでいるかどうか
+   * @param presuccdead SuccessorのPredecessorが生きているか
    * @param rightness このノードがSuccessorの正当なPredecessorか
    * @param consistentness SuccessorとPredecessorとの関係に矛盾がないか
    * @return 実行すべき戦略。
    */
-  def generate(succliving: Boolean, presuccliving: Boolean, rightness: Boolean, consistentness: Boolean, agent: Agent[ChordState]) = {
+  def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean) = {
     println("generator working")
-    if (!succliving) {
+    if (succdead) {
       // Successorが死んでる
-      SuccDeadStrategy(agent)
-    } else if (!presuccliving) {
+      SuccDeadStrategy
+    } else if (presuccdead) {
       // SuccessorのPredecessorが死んでる
-      PreSuccDeadStrategy(agent)
+      PreSuccDeadStrategy
     } else if (consistentness) {
       // 想定されるうえでふつうの状況
-      NormalStrategy(agent)
+      NormalStrategy
     } else if (rightness) {
       // Successorとpre-Successorとの間に割り込む場合
-      RightStrategy(agent)
+      RightStrategy
     } else {
       // Successorとpre-successorとの間に入れない場合
       // TODO: Gaucheになる基準がゆるすぎる。なぜかすぐにsuccessorがpredecessorに変異してしまう。
-      GaucheStrategy(agent)
+      GaucheStrategy
     }
   }
 
@@ -52,17 +51,16 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * @param state ChordState
    * @return 生きて（いるtrue/いないfalse）
    */
-  def checkSuccLiving(state: ChordState): Boolean = {
+  def isSuccDead(state: ChordState): Boolean = {
     try {
       state.succList.nearestSuccessor(id_self = state.selfID.get) match {
-        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => true
-        // case nrst if nrst.a.isTerminated => false // deleted deprecated
-        case nrst => nrst.getClient(state.selfID.get).checkLiving
+        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false
+        case nrst => !nrst.getClient(state.selfID.get).checkLiving
       }
     } catch {
       case e: Exception =>
         context.system.log.warning(e.getLocalizedMessage)
-        false
+        true
     }
   }
 
@@ -70,18 +68,16 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * SuccessorのPredecessorが生きているかどうかを返します。
    * @return { @see #checkSuccLiving}と同じです。
    */
-  def checkPreSuccLiving(state: ChordState): Boolean = {
+  def isPreSuccDead(state: ChordState): Boolean = {
     try {
       val cli_next: Transmitter = state.succList.nearestSuccessor(id_self = state.selfID.get).getClient(state.selfID.get)
       Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
         case None => false
-        case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => true
-        // case Some(preNext) if preNext.a.isTerminated => false
-        case Some(preNext) => preNext.getClient(state.selfID.get).checkLiving
-
+        case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
+        case Some(preNext) => !preNext.getClient(state.selfID.get).checkLiving
       }
     } catch {
-      case _: Exception => false
+      case _: Exception => true
     }
   }
 
@@ -89,12 +85,11 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * Predecessorが生きているかどうかを返します。
    * @return { @see #checkSuccLiving}と同じです。
    */
-  def checkPredLiving(state: ChordState): Boolean = {
+  def isPredLiving(state: ChordState): Boolean = {
     state.pred match {
       case Some(v) =>
         v match {
           case ida if ida.getNodeID == state.selfID.get.getNodeID => true
-          // case ida if ida.a.isTerminated => false
           case ida => ida.getClient(state.selfID.get).checkLiving
         }
       case None => false
