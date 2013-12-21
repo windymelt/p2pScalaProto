@@ -1,9 +1,14 @@
 language: scala
 scala:
    - 2.10.2
+branches:
+   only:
+       - develop
 jdk:
    - oraclejdk7
    - openjdk6
+notifications:
+  email: true
 script:
 sbt ++$TRAVIS_SCALA_VERSION compile
 sbt ++$TRAVIS_SCALA_VERSION test
