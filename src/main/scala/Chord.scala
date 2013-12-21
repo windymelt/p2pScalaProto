@@ -95,7 +95,7 @@ class Chord {
    */
   def join(str: String): Future[ACK.type] = {
     import scala.concurrent.ExecutionContext.Implicits.global
-    Future(join(idAddress.fromString(str)))
+    Future(join(idAddress.fromString(str)(system)))
   }
 
   /**
