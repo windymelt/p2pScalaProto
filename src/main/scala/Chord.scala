@@ -6,10 +6,7 @@ import com.typesafe.config.ConfigFactory
 import akka.agent.Agent
 import scala.collection.immutable.HashMap
 
-
 class Chord {
-
-  type dataMap = HashMap[Seq[Byte], Seq[Byte]]
 
   import scala.concurrent.Future
 
@@ -41,7 +38,7 @@ class Chord {
     if (!customConf.atKey("automatic-portmap").isEmpty && customConf.getBoolean("automatic-portmap")) {
       val exp = customConf.getInt("akka.remote.netty.tcp.port")
       val inp = exp
-      uOpener = new UPnPOpener(exp, inp, "TCP", "P2PScalaProto", 1 hour)(system.log)
+      val uOpener = new UPnPOpener(exp, inp, "TCP", "P2PScalaProto", 1 hour)(system.log)
 
       system.log.debug(s"opening port [$exp]...")
       if (uOpener.open) {
