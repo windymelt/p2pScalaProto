@@ -21,7 +21,7 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
   //(context.system.dispatcher)
 
   val log = Logging(context.system, this)
-  val handler = new MessageHandler(stateAgt, context, log)
+  val handler = new ChordController(stateAgt, context, log)
 
   /**
    * 受け取ったメッセージを処理します。
