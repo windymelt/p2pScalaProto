@@ -10,5 +10,5 @@ jdk:
 notifications:
   email: true
 script:
-- sbt ++$TRAVIS_SCALA_VERSION compile
-- sbt ++$TRAVIS_SCALA_VERSION test
+- sbt ++$TRAVIS_SCALA_VERSION -Dsbt.log.noformat=true compile
+- sbt ++$TRAVIS_SCALA_VERSION -Dsbt.log.noformat=true test
