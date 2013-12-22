@@ -16,7 +16,7 @@ class Chord {
     config
   })
   val system = ActorSystem("ChordCore-DHT", ConfigFactory.load(customConf))
-  val receiver = system.actorOf(Props(classOf[MessageReceiver], stateAgt), "MessageReceiver")
+  val receiver = system.actorOf(Props(classOf[MessageReceiver], stateAgt), "Receiver")
   val stateAgt: Agent[ChordState] = Agent(new ChordState(
     None,
     NodeList(List(idAddress(Array.fill(20)(0.toByte), receiver))),
@@ -95,7 +95,10 @@ class Chord {
    */
   def join(str: String): Future[ACK.type] = {
     import scala.concurrent.ExecutionContext.Implicits.global
-    Future(join(idAddress.fromString(str)(system)))
+    idAddress.fromString(str)(system) match {
+      case Some(ida) => Future(join(ida))
+      case None => Future.failed(new Exception("Invalid node reference."))
+    }
   }
 
   /**

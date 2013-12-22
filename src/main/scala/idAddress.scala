@@ -36,7 +36,7 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
       case null ⇒ actorref.path.toString
       case address ⇒ actorref.path.toStringWithAddress(address)
     }*/
-    nodeID(idVal).getBase64 + "\n" + s"akka.tcp://ChordCore-DHT@$hostname:$port/user/ChordCore2ch"
+    nodeID(idVal).getBase64 + "@" + hostname + ":" + port
   }
 
 
@@ -46,13 +46,19 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
 
 object idAddress {
 
-  def fromString(str: String)(implicit system: ActorSystem): idAddress = {
+  def fromString(str: String)(implicit system: ActorSystem): Option[idAddress] = {
     import scala.concurrent.duration._
     import scala.concurrent.Await
+    import scala.util.matching.Regex
 
-    val spr = str.split("\n")
-    val actorF = system.actorSelection(spr(1)).resolveOne(50 seconds)
-    idAddress(Base64.decode(spr(0)), Await.result(actorF, 10 second))
+    val Matcher = new Regex( """([a-zA-Z0-9=\\\+]+)@(.+):(\d+)""", "id", "host", "name")
+
+    str match {
+      case Matcher(id, host, port) =>
+        val actorF = system.actorSelection(s"akka.tcp://ChordCore-DHT@$host:$port/user/Receiver2ch").resolveOne(50 seconds) // いまのところp2p2ch専用
+        Some(idAddress(Base64.decode(id), Await.result(actorF, 10 seconds)))
+      case _ => None
+    }
   }
 
 }
