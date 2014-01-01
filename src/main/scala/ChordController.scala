@@ -4,7 +4,6 @@ import akka.event.LoggingAdapter
 import akka.actor._
 import akka.agent.Agent
 
-
 class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorContext, log: LoggingAdapter) {
 
   import scalaz._

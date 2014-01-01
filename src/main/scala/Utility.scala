@@ -16,7 +16,6 @@ object Utility {
 
     val r = new Random()
 
-
     def sandwitch[A, B, C, D <% Iterable[A], E <% Iterable[B]](f: (A => B => C))(x: D)(y: E): Seq[C] = {
       x.zip(y).map {
         (t: (A, B)) => f(t._1)(t._2)

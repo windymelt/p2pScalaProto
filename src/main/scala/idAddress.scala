@@ -39,7 +39,6 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
     nodeID(idVal).getBase64 + "@" + hostname + ":" + port
   }
 
-
   /** 新たにノードIDのみで焼き直す */
   def getNodeID: nodeID = nodeID(id)
 }
@@ -70,7 +69,6 @@ trait TActorRef {
     new Transmitter(actorref, selfid)
   }
 }
-
 
 case class nodeID(bytes: Array[Byte]) extends TnodeID {
   override val idVal = bytes

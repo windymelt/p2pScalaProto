@@ -60,20 +60,5 @@ class ChordStateSpec extends Specification with BeforeExample with NoTimeConvers
     }
   }
 
-
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

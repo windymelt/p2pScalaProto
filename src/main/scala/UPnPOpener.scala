@@ -8,7 +8,6 @@ class UPnPOpener(val external_port: Int, val local_port: Int, val protocol: Stri
 
   import com.psyonik.upnp._
 
-
   def open = {
     GatewayDiscover().getValidGateway() >>= {
       gw =>

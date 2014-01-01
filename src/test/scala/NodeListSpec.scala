@@ -1,8 +1,10 @@
 package momijikawa.p2pscalaproto.test
+
 import org.specs2.mutable._
 import momijikawa.p2pscalaproto._
 
 class NodeListSpec extends Specification {
+
   import akka.actor._
   import akka.actor.ActorDSL._
   import scalaz._
@@ -10,16 +12,22 @@ class NodeListSpec extends Specification {
 
   implicit val system = ActorSystem(name = "testframe")
 
-  val dummyActor = actor("dummy")(new Act{
+  val dummyActor = actor("dummy")(new Act {
     become {
       case anything => // do nothing
     }
   })
 
-//  val OMEGA = BigInt(2).pow(160)
+  //  val OMEGA = BigInt(2).pow(160)
 
-    /** 0-1-2-3-4-5-6-7-_-_-_-_-0*/
-  val nodes: List[idAddress] = (0 to 6) map {BigInt(_)} map {_.toByteArray} map {idAddress(_, dummyActor)} toList
+  /** 0-1-2-3-4-5-6-7-_-_-_-_-0 */
+  val nodes: List[idAddress] = (0 to 6) map {
+    BigInt(_)
+  } map {
+    _.toByteArray
+  } map {
+    idAddress(_, dummyActor)
+  } toList
 
   val nodelist: NodeList = NodeList(nodes)
 
@@ -39,8 +47,7 @@ class NodeListSpec extends Specification {
 
   }
 
-
-/*  "nearestNeighbor" should {
+  /*  "nearestNeighbor" should {
 
     "0のNearestNeighborは1" in {
       nodelist.remove(0).nearestNeighbor(nodelist.nodes.list(4), nodelist.nodes.list(0)).getNodeID.toBigInt must_== nodelist.nodes.list(1).getNodeID.toBigInt
@@ -75,7 +82,7 @@ class NodeListSpec extends Specification {
     }
   }
 
-/*  "sortedBySelfID" should {
+  /*  "sortedBySelfID" should {
     "3を除いたNodeListで3基準でソートすると4,5,6に並ぶ" in {
       nodelist.remove(3).sortedBySelfID(id_self = nodelist.nodes.list(3)).nodes.list.take(3).map{
         _.getNodeID.toBigInt

@@ -83,7 +83,6 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
     case m => log.error(s"unknown message: $m")
   }
 
-
   override def preStart() = {
     log.debug("MessageReceiver has been newed")
   }

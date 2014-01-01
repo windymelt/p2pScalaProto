@@ -98,7 +98,6 @@ case class PreSuccDeadStrategy(implicit context: ActorContext) extends stabiliza
       (cs, this)
   }
 
-
 }
 
 /**

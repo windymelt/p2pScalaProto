@@ -26,8 +26,7 @@ case class ChordState(
                        fingerList: NodeList,
                        pred: Option[idAddress],
                        dataholder: HashMap[Seq[Byte], KVSData],
-                       stabilizer: ActorRef
-                       ) {
+                       stabilizer: ActorRef) {
   def dropNode(a: ActorRef): ChordState = {
     this.copy(selfID, succList.remove(a), fingerList.replace(a, selfID.get), pred.flatMap((i) => if (i.a == a) None else i.some), dataholder, stabilizer)
   }

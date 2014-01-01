@@ -42,7 +42,6 @@ case class ChankReturn(id: Seq[Byte], Value: KVSData) extends nodeMessage
 
 case class Immigration(data: scala.collection.immutable.HashMap[Seq[Byte], KVSData]) extends nodeMessage
 
-
 class stabilizeMessage extends Message
 
 case object StartStabilize extends stabilizeMessage

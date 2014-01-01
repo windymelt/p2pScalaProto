@@ -1,0 +1,10 @@
+.DS_Store
+Thumnail.db
+from/
+lib_managed/
+src_managed/
+project/boot/
+project/from
+target/*
+project/target/*
+project/project/target/*
