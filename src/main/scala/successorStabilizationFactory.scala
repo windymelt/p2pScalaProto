@@ -14,7 +14,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    */
   def autoGenerate(st: ChordState) = atomic {
     implicit txn =>
-      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st))
+      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st), checkIsSuccMe(st))
   }
 
   /**
