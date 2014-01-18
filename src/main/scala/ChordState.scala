@@ -156,6 +156,7 @@ object ChordState {
    */
   def yourPredecessor(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
     context.system.log.debug("YourPredecessorCore")
+    // ここでもsuccの自動変更が必要？
     cs.stabilizer ! StartStabilize
     cs.pred
   }
@@ -165,31 +166,59 @@ object ChordState {
    * 渡された[[momijikawa.p2pscalaproto.idAddress]]と現在のPredecessorを比較し、原則として、より近い側をPredecessorとして決め、ノードの状態を更新します。
    * また、渡されたものと自分が同じノードであるときは変更しません。
    * また、現在のPredecessorが利用できないときには渡された[[momijikawa.p2pscalaproto.idAddress]]を受け入れます。
-   * @param address 比較対象のPredecessor。
+   * @param sender 比較対象のPredecessor。
    * @param state 自分のノードの状態。
    */
-  def checkPredecessor(address: idAddress, state: Agent[ChordState])(implicit context: ActorContext) = {
+  def checkPredecessor(sender: idAddress, state: Agent[ChordState])(implicit context: ActorContext) = {
+    // selfがsaidではなく、指定した条件に合致した場合には交換の必要ありと判断する
+    // 送信元がselfの場合は無視し、そうでないときは検査開始
+    require(state().selfID.isDefined)
+
+    // ----- //
     val check: (ChordState) => Boolean =
       (st) => allCatch.opt {
-        println("checking my predecessor")
+        context.system.log.debug("ChordState: checking my predecessor")
+
         // when pred is self?
-        val selfIsNotSaid = !(st.selfID.get.getNodeID == address.getNodeID)
-        val predIsNone = st.pred.isEmpty
-        val saidWorths = (st.pred map {
-          pred => address.belongs_between(pred).and(st.selfID.get) || st.selfID.get == pred
-        }) | false // pred = Noneの場合も考慮
-        val predIsDead = !new successorStabilizationFactory().isPredLiving(st) // 副作用あり
-        println("checkpredecessor - P fetched")
-        selfIsNotSaid ∧ (predIsNone ∨ saidWorths ∨ predIsDead)
+        val isSenderSelf = st.selfID.get.getNodeID == sender.getNodeID
+
+        isSenderSelf match {
+          case true => false // 必要無し
+          case false =>
+            val isPredEmpty = st.pred.isEmpty
+            val isSaidNodeBetter = (st.pred map {
+              pred => {
+                sender.belongs_between(pred).and(st.selfID.get) ||
+                  st.selfID.get == pred /*||
+                  (
+                    !st.succList.nodes.empty
+                && st.succList.nearestSuccessorWithoutSelf(st.selfID.get).flatMap(ida => Some(ida == pred)).getOrElse(false)
+                    )
+                    */
+              }
+            }) | false // pred = Noneの場合も考慮
+          val isPredDead = !new successorStabilizationFactory().isPredLiving(st) // 副作用あり
+            isPredEmpty ∨ isSaidNodeBetter ∨ isPredDead
+        }
       } | false
 
     val execute: Boolean => (Agent[ChordState], idAddress) => Unit = {
       case true => (agt: Agent[ChordState], addr: idAddress) => {
-        println("going to replace predecessor.")
+        context.system.log.info("going to replace predecessor.")
+
+        // 以前のpredがあればアンウォッチする
         agt().pred map (ida => context.unwatch(ida.actorref))
+
+        // predを変更する
         agt send {
-          // TODO: Succ==selfの場合、Succも置き変える必要がある？
           _.copy(pred = addr.some)
+        }
+
+        // succ=selfの場合、succも同時変更する
+        if (agt().succList.nearestSuccessor(agt().selfID.get) == agt().selfID.get) {
+          agt send {
+            _.copy(succList = NodeList(List(addr)))
+          }
         }
         agt().stabilizer ! StartStabilize
         context.watch(addr.actorref)
@@ -199,7 +228,7 @@ object ChordState {
     }
 
     atomic {
-      implicit txn => (check >>> execute)(state())(state, address)
+      implicit txn => (check >>> execute)(state())(state, sender)
     }
   }
 

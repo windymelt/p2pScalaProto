@@ -17,7 +17,7 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
   override val actorref = a
 
   override def equals(obj: Any) = obj match {
-    case that: idAddress => id.deep == that.id.deep && a == that.a
+    case that: idAddress => id.deep == that.id.deep && a.toString() == that.a.toString()
     case otherwise => false
   }
 
@@ -107,10 +107,12 @@ trait TnodeID {
   def <->(x: TnodeID) = TnodeID.distance(this, x)
 
   /** シュガーシンタックス */
+  // (x, y]のときにhitする。
+  // TODO: test^^^
   def belongs_between(x: TnodeID) = {
     lazy val self = this
     new {
-      def and(y: TnodeID): Boolean = (self <----- y) < (x <----- y)
+      def and(y: TnodeID): Boolean = (self <----- y) < (x <----- y) // 等しい場合は他のノードが担当するので含めない
     }
   }
 

@@ -39,8 +39,8 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
     //scheduler.cancel()
     isStarted() match {
       case false =>
-        log.debug("stabilizer started")
-        scheduler = context.system.scheduler.schedule(10 seconds, 30 seconds, chord, message)
+        log.info("stabilizer started")
+        scheduler = context.system.scheduler.schedule(10 seconds, 5 seconds, chord, message)
         isStarted send true
       case true => // do nothing
     }
@@ -54,7 +54,7 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
   def stop() = {
     isStarted() match {
       case true =>
-        log.debug("going to stop stabilizer")
+        log.info("going to stop stabilizer")
         scheduler.cancel()
         isStarted send false
       case false => // do nothing

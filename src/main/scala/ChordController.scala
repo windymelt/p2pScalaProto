@@ -89,11 +89,23 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
    * 実際の安定化処理を行ないます。この動作は別スレッドで行なわれます。
    */
   def stabilize() = spawn {
-    log.debug("Stabilizing stimulated")
+    log.info("Stabilizing stimulated")
     val strategy = new successorStabilizationFactory().autoGenerate(stateAgt())
-    log.debug("Strategy done: " + strategy.toString())
+    stateAgt send {
+      agt => strategy.doStrategy(agt)._1
+    }
+    log.info("Strategy done: " + strategy.toString())
     stateAgt send fingerStabilizer.stabilize
-    log.debug("fingertable stabilized")
+    log.info("fingertable stabilized")
+
+    // succ=selfで、有効なpredがある場合succをpredに変更する
+    if (stateAgt().succList.nearestSuccessor(stateAgt().selfID.get) == stateAgt().selfID.get
+      && stateAgt().pred.isDefined
+      && stateAgt().pred.flatMap(pred => stateAgt().selfID.map(self => pred != self)).getOrElse(false)) {
+      stateAgt send {
+        _.copy(succList = NodeList(List(stateAgt().pred.get)))
+      }
+    }
   }
 
   def unregistNode(a: ActorRef) = {

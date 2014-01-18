@@ -69,7 +69,9 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
         sender ! stateAgt().dataholder.get(key) // => Option[KVSData] //sender.!?[Array[Byte]](GetChunk(key))
       case x => receiveExtension(x, sender)
     }
-    case Terminated(a: ActorRef) => handler.unregistNode(a)
+    case Terminated(a: ActorRef) =>
+      log.info(s"Node terminate detection: ${a.toString()}")
+      handler.unregistNode(a)
     case x => receiveExtension(x, sender)
   }
 
@@ -80,7 +82,7 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
    * @param context [[akka.actor.ActorContext]]
    */
   def receiveExtension(x: Any, sender: ActorRef)(implicit context: ActorContext) = x match {
-    case m => log.error(s"unknown message: $m")
+    case m => log.warning(s"unknown message: $m")
   }
 
   override def preStart() = {

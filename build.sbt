@@ -2,7 +2,7 @@ name := "P2PScalaProto"
 
 organization := "momijikawa"
 
-version := "0.2.11"
+version := "0.2.13"
 
 scalaVersion := "2.10.2"
 

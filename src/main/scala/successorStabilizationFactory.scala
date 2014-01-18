@@ -14,7 +14,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    */
   def autoGenerate(st: ChordState) = atomic {
     implicit txn =>
-      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st))
+      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st), checkIsSuccMe(st))
   }
 
   /**
@@ -25,24 +25,27 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * @param consistentness SuccessorとPredecessorとの関係に矛盾がないか
    * @return 実行すべき戦略。
    */
-  def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean) = {
+  def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean, issuccme: Boolean) = {
 
-    if (succdead) {
+    if (issuccme) {
+      NormalStrategy(context)
+    } else if (succdead) {
       // Successorが死んでる
-      SuccDeadStrategy
+      SuccDeadStrategy(context)
     } else if (presuccdead) {
       // SuccessorのPredecessorが死んでる
-      PreSuccDeadStrategy
+      PreSuccDeadStrategy(context)
     } else if (consistentness) {
       // 想定されるうえでふつうの状況
-      NormalStrategy
+      NormalStrategy(context)
     } else if (rightness) {
       // Successorとpre-Successorとの間に割り込む場合
-      RightStrategy
+      RightStrategy(context)
     } else {
       // Successorとpre-successorとの間に入れない場合
       // TODO: Gaucheになる基準がゆるすぎる。なぜかすぐにsuccessorがpredecessorに変異してしまう。
-      GaucheStrategy
+      // TODO: RightとGaucheを統合するべきではないか
+      GaucheStrategy(context)
     }
   }
 
@@ -59,8 +62,8 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       }
     } catch {
       case e: Exception =>
-        context.system.log.warning(e.getLocalizedMessage)
-        true
+        context.system.log.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        false
     }
   }
 
@@ -70,14 +73,21 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    */
   def isPreSuccDead(state: ChordState): Boolean = {
     try {
-      val cli_next: Transmitter = state.succList.nearestSuccessor(id_self = state.selfID.get).getClient(state.selfID.get)
-      Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
-        case None => false
-        case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
-        case Some(preNext) => !preNext.getClient(state.selfID.get).checkLiving
+      state.succList.nearestSuccessor(state.selfID.get) match {
+        case succ if succ == state.selfID.get => false // 死んでいないものとして扱う
+        case succ =>
+          val cli_next: Transmitter = sc.getClient(state.selfID.get)
+
+          Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
+            case None => true
+            case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
+            case Some(preNext) => !preNext.getClient(state.selfID.get).checkLiving
+          }
       }
     } catch {
-      case _: Exception => true
+      case e: Exception =>
+        context.system.log.warning(s"Error on function [isPreSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        false
     }
   }
 
@@ -123,12 +133,27 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    * @return 参照している場合はtrueを、それ以外の場合はfalseを返します。
    */
   def checkConsistentness(state: ChordState): Boolean = {
-    val preSucc: Option[idAddress] = Await.result(state.succList.nearestSuccessor(id_self = state.selfID.get).getClient(state.selfID.get).yourPredecessor, 10 second).idaddress
-    preSucc match {
-      case None => false
-      case Some(pSucc) =>
-        context.system.log.debug(s"checkConsistentness: (${state.selfID.get.getNodeID},${pSucc.getNodeID}})")
-        state.selfID.get.getNodeID == pSucc.getNodeID
+    // 閉鎖状態の場合で分け
+    state.succList.nearestSuccessorWithoutSelf(state.selfID.get) match {
+      case Some(ida: idAddress) =>
+        val preSucc: Option[idAddress] = Await.result(ida.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress
+        preSucc match {
+          case None =>
+            sys.error("到達しないはず")
+            false // 到達しないはず
+          case Some(pSucc) =>
+            context.system.log.info(s"checkConsistentness: (${state.selfID.get.getNodeID}, ${pSucc.getNodeID}})")
+            state.selfID.get.getNodeID == pSucc.getNodeID
+        }
+      case None => true // SuccListには自分しかいないとき
+    }
+
+  }
+
+  def checkIsSuccMe(state: ChordState): Boolean = {
+    state.succList.nearestSuccessorWithoutSelf(state.selfID.get) match {
+      case None => true
+      case Some(_) => false
     }
   }
 }
