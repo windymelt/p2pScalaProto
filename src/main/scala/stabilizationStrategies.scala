@@ -88,9 +88,7 @@ case class SuccDeadStrategy(context: ActorContext) extends stabilizationStrategy
   def joinNetwork(cs: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(cs)
 }
 
-case class PreSuccDeadStrategy(context: ActorContext) extends stabilizationStrategy {
-  implicit val ctx = context
-
+case class PreSuccDeadStrategy(implicit context: ActorContext) extends stabilizationStrategy {
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       super.before()
@@ -107,9 +105,7 @@ case class PreSuccDeadStrategy(context: ActorContext) extends stabilizationStrat
  * 自分がSuccessorの正当なPredecessorである場合のストラテジです。
  * Successorに対してPredecessorを確認し、変更すべきことを通知します。
  */
-case class RightStrategy(context: ActorContext) extends stabilizationStrategy {
-  implicit val ctx = context
-
+case class RightStrategy(implicit context: ActorContext) extends stabilizationStrategy {
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       super.before()
@@ -125,9 +121,7 @@ case class RightStrategy(context: ActorContext) extends stabilizationStrategy {
  * 自分がSuccessorの正当なPredecessorではない場合のストラテジです。
  * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
  */
-case class GaucheStrategy(context: ActorContext) extends stabilizationStrategy {
-  implicit val ctx = context
-
+case class GaucheStrategy(implicit context: ActorContext) extends stabilizationStrategy {
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       atomic {
@@ -137,7 +131,6 @@ case class GaucheStrategy(context: ActorContext) extends stabilizationStrategy {
 
           preSucc match {
             case Some(v) =>
-              context.system.log.info("Received Predecessor of Sucessor from Successor")
               val renewedcs: State[ChordState, ChordState] = for {
                 _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => unwatch(ida)))
                 _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
@@ -150,8 +143,7 @@ case class GaucheStrategy(context: ActorContext) extends stabilizationStrategy {
               (renewedcs.run(cs)._1, this)
 
             case None =>
-              context.system.log.info("Received Predecessor of Successor but it's [None]")
-              new PreSuccDeadStrategy(context).doStrategy(cs)
+              new PreSuccDeadStrategy().doStrategy(cs)
           }
       }
   }
@@ -166,22 +158,18 @@ case class GaucheStrategy(context: ActorContext) extends stabilizationStrategy {
  * 通常時のストラテジです。
  * Successorを増やし、データの異動が必要な場合は転送します。
  */
-case class NormalStrategy(context: ActorContext) extends stabilizationStrategy {
-  implicit val ctx = context
+case class NormalStrategy(implicit context: ActorContext) extends stabilizationStrategy {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       super.before()
-
-      // ChordStateを関数チェインさせる
       val newcs = cs |> increaseSuccessor >>> watchRegistNodes >>> immigrateData
 
       (newcs, this)
   }
 
-  // Successorが死んだ場合に備えて、Successorの予備を追加します。
   val increaseSuccessor = (cs: ChordState) => {
     context.system.log.debug("going to add successor")
 
@@ -201,71 +189,41 @@ case class NormalStrategy(context: ActorContext) extends stabilizationStrategy {
     }
   }
 
-  // 新たに追加されたノードを監視します。
   val watchRegistNodes = (cs: ChordState) => {
     cs.succList.nodes.list.foreach(ida => watch(ida))
     cs
   }
 
-  // データをより最適なノードに移動させます。
   val immigrateData = (cs: ChordState) => {
     cs.selfID >>= {
       self =>
-        val dataKeyToMove = listUpToMove(cs)
-        val dataKeyAndRecipients = findContainerNode(self, dataKeyToMove)
-        // tupleで受け取る
-        val movingResult = dataKeyAndRecipients.par.map(moveChunk(dataKeyToMove, self).tupled)
+        val dataShouldBeMoved = listUpToMove(cs)
+        val recipientNode = findContainerNode(self, dataShouldBeMoved)
+        val moving = recipientNode map moveChunk(dataShouldBeMoved, self).tupled
 
-        // 移動がうまくいったらそのデータは手元からは削除する
-        val keysToRemove = (movingResult collect {
-          case Some(key: Seq[Byte]) => key
-        }).seq
-
-        Some(cs.copy(dataholder = cs.dataholder -- keysToRemove))
-      /*
-        movingResult.toList.sequence match {
-          case Some(_) => cs.copy(dataholder = cs.dataholder -- dataKeyToMove.keys).some
+        moving.toList.sequence match {
+          case Some(_) => cs.copy(dataholder = cs.dataholder -- dataShouldBeMoved.keys).some
           case None => cs.some
         }
-        */
     }
   } | cs
 
-  // このノードから他のノードに移動させるべきデータを列挙します。
   def listUpToMove(cs: ChordState): Map[Seq[Byte], KVSData] = {
-    import scala.util.control.Exception._
-    // allCatchのため
     cs.dataholder.filterKeys {
       (key: Seq[Byte]) =>
-
-      // 自分を含めたPredecessorとの間にあるID: (Predecessor, Self] がこのノードの担当IDなので、
-      // そこに含まれないIDは移動させるべき。
-      // pred, selfIDのいずれかがNoneの場合は無視する。
-        (cs.pred |@| cs.selfID) {
-          !nodeID(key.toArray).belongs_between(_).and(_)
-        } | false
-
-      //nodeID(key.toArray).belongs_between(cs.selfID.get).and(cs.succList.nearestSuccessor(cs.selfID.get)) ||
-      //  !nodeID(key.toArray).belongs_between(cs.selfID.get).and(NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), cs.selfID.get))
+        nodeID(key.toArray).belongs_between(cs.selfID.get).and(cs.succList.nearestSuccessor(cs.selfID.get)) ||
+          !nodeID(key.toArray).belongs_between(cs.selfID.get).and(NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), cs.selfID.get))
     }
   }
 
-  /**
-   * データの移動先のノードを探し、データのキーと[[momijikawa.p2pscalaproto.idAddress]]のペアで返す。
-   * @param self このノードの[[momijikawa.p2pscalaproto.idAddress]]
-   * @param keyAndData キーとデータのマップ
-   * @return データのキーと対応するノード
-   */
-  def findContainerNode(self: idAddress, keyAndData: Map[Seq[Byte], KVSData]): Map[Seq[Byte], idAddress] = {
-    keyAndData collect {
-      // きちゃない。
-      case (key: Seq[Byte], _: KVSData) if Await.result(self.getClient(self).findNode(nodeID(key.toArray)), 50 second).idaddress.isDefined =>
-        (key, Await.result(self.getClient(self).findNode(nodeID(key.toArray)), 50 second).idaddress.get)
+  def findContainerNode(self: idAddress, map: Map[Seq[Byte], KVSData]): Map[Seq[Byte], IdAddressMessage] = {
+    map map {
+      (f: (Seq[Byte], KVSData)) =>
+        (f._1, Await.result(self.getClient(self).findNode(nodeID(f._1.toArray)), 50 second))
     }
   }
 
-  // 実際にデータを移動させる
-  val moveChunk = (dataToMove: Map[Seq[Byte], KVSData], self: idAddress) => (key: Seq[Byte], node: idAddress) => {
-    node.getClient(self).setChunk(key, dataToMove(key))
+  val moveChunk = (toMove: Map[Seq[Byte], KVSData], self: idAddress) => (key: Seq[Byte], idam: IdAddressMessage) => {
+    idam.idaddress.get.getClient(self).setChunk(key, toMove(key))
   }
 }

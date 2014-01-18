@@ -14,7 +14,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
    */
   def autoGenerate(st: ChordState) = atomic {
     implicit txn =>
-      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st), checkIsSuccMe(st))
+      generate(isSuccDead(st), isPreSuccDead(st), checkConsistentness(st), checkRightness(st))
   }
 
   /**
@@ -76,7 +76,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       state.succList.nearestSuccessor(state.selfID.get) match {
         case succ if succ == state.selfID.get => false // 死んでいないものとして扱う
         case succ =>
-          val cli_next: Transmitter = sc.getClient(state.selfID.get)
+          val cli_next: Transmitter = succ.getClient(state.selfID.get)
 
           Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
             case None => true
