@@ -36,7 +36,8 @@ trait stabilizationStrategy {
  * Successorとの通信ができないときのパターンです。まずSuccessorのリストから次のSuccessor候補を探し出し接続しようとし、
  * 失敗した場合はPredecessorとの接続を試行しますが、失敗した場合は安定化処理を中止します。
  */
-case class SuccDeadStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+case class SuccDeadStrategy(context: ActorContext) extends stabilizationStrategy {
+  implicit val ctx = context
 
   /**
    * Successorが死んでいるものとみなし、Successorのリストを再構築します。
@@ -46,6 +47,7 @@ case class SuccDeadStrategy(implicit context: ActorContext) extends stabilizatio
     cs =>
       atomic {
         implicit txn =>
+          context.system.log.info("INVOKED: SuccDeadStrategy")
           super.before()
           val newcs = cs.succList.nodes.size ?|? 1 match {
             case GT => recoverSuccList(cs) // SuccListに余裕があるとき
@@ -87,9 +89,12 @@ case class SuccDeadStrategy(implicit context: ActorContext) extends stabilizatio
   def joinNetwork(cs: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(cs)
 }
 
-case class PreSuccDeadStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+case class PreSuccDeadStrategy(context: ActorContext) extends stabilizationStrategy {
+  implicit val ctx = context
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
+      context.system.log.info("INVOKED: PreSuccDeadStrategy")
       super.before()
       cs.selfID >>= {
         self =>
@@ -104,9 +109,12 @@ case class PreSuccDeadStrategy(implicit context: ActorContext) extends stabiliza
  * 自分がSuccessorの正当なPredecessorである場合のストラテジです。
  * Successorに対してPredecessorを確認し、変更すべきことを通知します。
  */
-case class RightStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+case class RightStrategy(context: ActorContext) extends stabilizationStrategy {
+  implicit val ctx = context
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
+      context.system.log.info("INVOKED: RightStrategy")
       super.before()
       cs.selfID >>= {
         self =>
@@ -120,11 +128,14 @@ case class RightStrategy(implicit context: ActorContext) extends stabilizationSt
  * 自分がSuccessorの正当なPredecessorではない場合のストラテジです。
  * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
  */
-case class GaucheStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+case class GaucheStrategy(context: ActorContext) extends stabilizationStrategy {
+  implicit val ctx = context
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       atomic {
         implicit txn =>
+          context.system.log.info("INVOKED: GaucheStrategy")
           super.before()
           val preSucc = getPreSucc(cs)
 
@@ -142,7 +153,7 @@ case class GaucheStrategy(implicit context: ActorContext) extends stabilizationS
               (renewedcs.run(cs)._1, this)
 
             case None =>
-              new PreSuccDeadStrategy().doStrategy(cs)
+              new PreSuccDeadStrategy(context).doStrategy(cs)
           }
       }
   }
@@ -157,7 +168,8 @@ case class GaucheStrategy(implicit context: ActorContext) extends stabilizationS
  * 通常時のストラテジです。
  * Successorを増やし、データの異動が必要な場合は転送します。
  */
-case class NormalStrategy(implicit context: ActorContext) extends stabilizationStrategy {
+case class NormalStrategy(context: ActorContext) extends stabilizationStrategy {
+  implicit val ctx = context
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -173,10 +185,12 @@ case class NormalStrategy(implicit context: ActorContext) extends stabilizationS
     context.system.log.debug("going to add successor")
 
     val succ = cs.succList.nearestSuccessor(id_self = cs.selfID.get) // assuming not null
+    val genList = (suc: idAddress) => (operation: idAddress => Option[idAddress]) => (length: Int) =>
+        unfold(suc)(_ |> operation map (_.squared)).take(length).toList
     val newSuccList: Option[List[idAddress]] = cs.selfID >>= {
-        selfid =>
-          Utility.failableRecursiveList[idAddress](ida => Await.result(ida.getClient(selfid).yourSuccessor, 10 second).idaddress, Some(succ), 4)
-      }
+      selfid =>
+        genList(succ)(ida => Await.result[IdAddressMessage](ida.getClient(selfid).yourSuccessor, 10 seconds).idaddress)(4).some
+    }
 
     newSuccList match {
       case Some(lis) =>
@@ -210,6 +224,7 @@ case class NormalStrategy(implicit context: ActorContext) extends stabilizationS
   def listUpToMove(cs: ChordState): Map[Seq[Byte], KVSData] = {
     cs.dataholder.filterKeys {
       (key: Seq[Byte]) =>
+        context.system.log.info(s"Combined SuccFingerList: ${(cs.succList.nodes.list ++ cs.fingerList.nodes.list).mkString("{", ", ", "}")}")
         nodeID(key.toArray).belongs_between(cs.selfID.get).and(cs.succList.nearestSuccessor(cs.selfID.get)) ||
           !nodeID(key.toArray).belongs_between(cs.selfID.get).and(NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), cs.selfID.get))
     }

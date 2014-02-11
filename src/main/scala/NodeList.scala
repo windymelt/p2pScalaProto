@@ -16,6 +16,18 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
     }
   }
 
+  def nearestNeighborWithoutSelf(id_query: TnodeID, id_self: TnodeID): Option[idAddress] = {
+    nodes.list.filterNot(_.getNodeID == nodeID(id_self.getArray())) match {
+      case lis: List[idAddress] if lis.isEmpty => None
+      case lis: List[idAddress] =>
+        Some(lis.filter(id_query.belongs_between(id_self).and(_))
+          .minBy {
+          distanceFrom(_) to id_query
+        }
+        )
+    }
+  }
+
   // TODO: 自分自身はどうするのか
   /**
    * 所与のノードIDにSuccessorとして最も近いノードを返します。
@@ -24,6 +36,13 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
    */
   def nearestSuccessor(id_self: TnodeID): idAddress =
     nodes.list.minBy(ida => TnodeID.leftArrowDistance(to = id_self, from = ida))
+
+  def nearestSuccessorWithoutSelf(id_self: TnodeID): Option[idAddress] =
+    nodes.list.filterNot(_.getNodeID == nodeID(id_self.getArray())) match {
+      case lis: List[idAddress] if lis.isEmpty => None
+      case lis: List[idAddress] =>
+        Some(lis.minBy(ida => TnodeID.leftArrowDistance(to = id_self, from = ida)))
+    }
 
   /**
    * 所与の番号のノード情報を削除した[[momijikawa.p2pscalaproto.NodeList]]を返します。
