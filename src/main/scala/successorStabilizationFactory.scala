@@ -5,9 +5,11 @@ import scala.concurrent.duration._
 import akka.agent.Agent
 import scala.concurrent.stm._
 import akka.actor.ActorContext
+import WatchableObject._
+import LoggerLikeObject._
 
 // TODO: 副作用を切り出してテストしやすくする
-class successorStabilizationFactory(implicit context: ActorContext) {
+class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
 
   /**
    * [[momijikawa.p2pscalaproto.ChordState]]から自動的に戦略を生成します。
@@ -28,24 +30,24 @@ class successorStabilizationFactory(implicit context: ActorContext) {
   def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean, issuccme: Boolean) = {
 
     if (issuccme) {
-      NormalStrategy(context)
+      NormalStrategy(watcher, logger)
     } else if (succdead) {
       // Successorが死んでる
-      SuccDeadStrategy(context)
+      SuccDeadStrategy(watcher, logger)
     } else if (presuccdead) {
       // SuccessorのPredecessorが死んでる
-      PreSuccDeadStrategy(context)
+      PreSuccDeadStrategy(logger)
     } else if (consistentness) {
       // 想定されるうえでふつうの状況
-      NormalStrategy(context)
+      NormalStrategy(watcher, logger)
     } else if (rightness) {
       // Successorとpre-Successorとの間に割り込む場合
-      RightStrategy(context)
+      RightStrategy(logger)
     } else {
       // Successorとpre-successorとの間に入れない場合
       // TODO: Gaucheになる基準がゆるすぎる。なぜかすぐにsuccessorがpredecessorに変異してしまう。
       // TODO: RightとGaucheを統合するべきではないか
-      GaucheStrategy(context)
+      GaucheStrategy(watcher, logger)
     }
   }
 
@@ -62,7 +64,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       }
     } catch {
       case e: Exception =>
-        context.system.log.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        logger.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
         false
     }
   }
@@ -86,7 +88,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       }
     } catch {
       case e: Exception =>
-        context.system.log.warning(s"Error on function [isPreSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        logger.warning(s"Error on function [isPreSuccDead]: ${e.getLocalizedMessage}; treat as living")
         false
     }
   }
@@ -142,7 +144,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
             sys.error("到達しないはず")
             false // 到達しないはず
           case Some(pSucc) =>
-            context.system.log.info(s"checkConsistentness: (SELF: ${state.selfID.get.getNodeID}, SUCC: ${ida.getNodeID}, PSUCC: ${pSucc.getNodeID}})")
+            logger.info(s"checkConsistentness: (SELF: ${state.selfID.get.getNodeID}, SUCC: ${ida.getNodeID}, PSUCC: ${pSucc.getNodeID}})")
             state.selfID.get.getNodeID == pSucc.getNodeID
         }
       case None => true // SuccListには自分しかいないとき

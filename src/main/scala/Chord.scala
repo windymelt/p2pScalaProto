@@ -1,6 +1,6 @@
 package momijikawa.p2pscalaproto
 
-import akka.actor.{ActorRef, Props, ActorSystem}
+import akka.actor.{ ActorRef, Props, ActorSystem }
 import com.sun.org.apache.xml.internal.security.utils.Base64
 import com.typesafe.config.ConfigFactory
 import akka.agent.Agent

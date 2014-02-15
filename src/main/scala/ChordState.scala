@@ -21,12 +21,12 @@ import scala.util.control.Exception._
  * @param stabilizer 安定化処理を行なうためのタイマ
  */
 case class ChordState(
-                       selfID: Option[idAddress],
-                       succList: NodeList,
-                       fingerList: NodeList,
-                       pred: Option[idAddress],
-                       dataholder: HashMap[Seq[Byte], KVSData],
-                       stabilizer: ActorRef) {
+    selfID: Option[idAddress],
+    succList: NodeList,
+    fingerList: NodeList,
+    pred: Option[idAddress],
+    dataholder: HashMap[Seq[Byte], KVSData],
+    stabilizer: ActorRef) {
   def dropNode(a: ActorRef): ChordState = {
     this.copy(selfID, succList.remove(a), fingerList.replace(a, selfID.get), pred.flatMap((i) => if (i.a == a) None else i.some), dataholder, stabilizer)
   }
@@ -86,14 +86,15 @@ object ChordState {
 
   val joinNetworkS: idAddress => State[ChordState, Option[idAddress]] = (target: idAddress) =>
     State[ChordState, Option[idAddress]] {
-      cs => {
-        for {
-          sid <- cs.selfID
-          newSucc <- (allCatch opt findSelf(target, sid)).flatten[idAddress]
-          newState <- regenerateState(cs, newSucc).some
-          _ <- startStabilize(newState).some
-        } yield (newState, newSucc.some)
-      } |(cs, None)
+      cs =>
+        {
+          for {
+            sid <- cs.selfID
+            newSucc <- (allCatch opt findSelf(target, sid)).flatten[idAddress]
+            newState <- regenerateState(cs, newSucc).some
+            _ <- startStabilize(newState).some
+          } yield (newState, newSucc.some)
+        } | (cs, None)
     }
 
   private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getClient(sid).findNode(sid), 10 second).idaddress
@@ -187,14 +188,15 @@ object ChordState {
           case false =>
             val isPredEmpty = st.pred.isEmpty
             val isSaidNodeBetter = (st.pred map {
-              pred => {
-                sender.belongs_between(pred).and(st.selfID.get) ||
-                  st.selfID.get == pred ||
-                  st.succList.nearestSuccessor(st.selfID.get).getNodeID == st.selfID.get.getNodeID
+              pred =>
+                {
+                  sender.belongs_between(pred).and(st.selfID.get) ||
+                    st.selfID.get == pred ||
+                    st.succList.nearestSuccessor(st.selfID.get).getNodeID == st.selfID.get.getNodeID
 
-              }
+                }
             }) | false // pred = Noneの場合も考慮
-          val isPredDead = !new successorStabilizationFactory().isPredLiving(st) // 副作用あり
+            val isPredDead = !new successorStabilizationFactory(context, context.system.log).isPredLiving(st) // 副作用あり
             isPredEmpty ∨ isSaidNodeBetter ∨ isPredDead
         }
       } | false

@@ -90,7 +90,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
    */
   def stabilize() = spawn {
     log.debug("Stabilizing stimulated")
-    val strategy = new successorStabilizationFactory().autoGenerate(stateAgt())
+    val strategy = new successorStabilizationFactory(context, context.system.log).autoGenerate(stateAgt())
     log.debug("Strategy done: " + strategy.toString())
     stateAgt send fingerStabilizer.stabilize
     log.debug("fingertable stabilized")
@@ -178,9 +178,9 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
       val BigZERO = BigInt(0)
       val sizeOfValue = value.foldLeft(BigZERO)((sum: BigInt, a: Byte) => sum + 1) // Int would overflow so BigInt
       val chunkCount = sizeOfValue.mod(1024) match {
-          case BigZERO => sizeOfValue / 1024
-          case otherwise => (sizeOfValue / 1024) + 1
-        }
+        case BigZERO => sizeOfValue / 1024
+        case otherwise => (sizeOfValue / 1024) + 1
+      }
       MetaData(title, chunkCount, sizeOfValue, digests)
     }
 
