@@ -31,7 +31,7 @@ class ActorSpec extends Specification {
     val system = ActorSystem("testsystem")
     val dummy = system.actorOf(Props[dummyActor], "dummy")
     val watcher = system.actorOf(Props[dummyWatcher], "watcher")
-    watcher !('watch, dummy)
+    watcher ! ('watch, dummy)
     dummy ! "hogehoge"
     dummy ! PoisonPill
     Thread.sleep(1000)

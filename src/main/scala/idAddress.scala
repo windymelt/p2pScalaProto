@@ -65,8 +65,8 @@ object idAddress {
 trait TActorRef {
   def actorref: ActorRef
 
-  def getClient(selfid: idAddress): Transmitter = {
-    new Transmitter(actorref, selfid)
+  def getTransmitter: Transmitter = {
+    new Transmitter(actorref)
   }
 }
 

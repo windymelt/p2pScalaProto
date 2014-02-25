@@ -48,6 +48,8 @@ case object StartStabilize extends stabilizeMessage
 
 case object StopStabilize extends stabilizeMessage
 
+case object StabilizeStatus extends stabilizeMessage
+
 class chordMessage extends Message
 
 case object Stabilize extends chordMessage

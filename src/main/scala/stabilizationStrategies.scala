@@ -26,7 +26,7 @@ trait stabilizationStrategy {
     //println(this.toString)
   }
 
-  def tellAmIPredecessor(ida: idAddress, self: idAddress): Unit = ida.getClient(self).amIPredecessor()
+  def tellAmIPredecessor(ida: idAddress, self: idAddress): Unit = ida.getTransmitter.amIPredecessor(self)
 }
 
 /**
@@ -81,7 +81,7 @@ case class SuccDeadStrategy(watcher: Watchable, logger: LoggerLike) extends stab
     joinNetwork(newState, newState.succList.nearestSuccessor(newState.selfID.get))._1 // TODO: predも使用できる
   }
 
-  def stopStabilize(cs: ChordState) = cs.stabilizer ! StopStabilize
+  def stopStabilize(cs: ChordState) = cs.stabilizer.stop()
 
   def joinNetwork(cs: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(cs)
 }
@@ -153,7 +153,7 @@ case class GaucheStrategy(watcher: Watchable, logger: LoggerLike) extends stabil
   }
 
   def getPreSucc(cs: ChordState): Option[idAddress] = {
-    Await.result(cs.succList.nearestSuccessor(cs.selfID.get).getClient(cs.selfID.get).yourPredecessor, 10 second).idaddress
+    Await.result(cs.succList.nearestSuccessor(cs.selfID.get).getTransmitter.yourPredecessor, 10 second).idaddress
   }
 
 }
@@ -182,7 +182,7 @@ case class NormalStrategy(watcher: Watchable, logger: LoggerLike) extends stabil
       unfold(suc)(_ |> operation map (_.squared)).take(length).toList
     val newSuccList: Option[List[idAddress]] = cs.selfID >>= {
       selfid =>
-        genList(succ)(ida => Await.result[IdAddressMessage](ida.getClient(selfid).yourSuccessor, 10 seconds).idaddress)(4).some
+        genList(succ)(ida => Await.result[IdAddressMessage](ida.getTransmitter.yourSuccessor, 10 seconds).idaddress)(4).some
     }
 
     newSuccList match {
@@ -226,11 +226,11 @@ case class NormalStrategy(watcher: Watchable, logger: LoggerLike) extends stabil
   def findContainerNode(self: idAddress, map: Map[Seq[Byte], KVSData]): Map[Seq[Byte], IdAddressMessage] = {
     map map {
       (f: (Seq[Byte], KVSData)) =>
-        (f._1, Await.result(self.getClient(self).findNode(nodeID(f._1.toArray)), 50 second))
+        (f._1, Await.result(self.getTransmitter.findNode(nodeID(f._1.toArray)), 50 second))
     }
   }
 
   val moveChunk = (toMove: Map[Seq[Byte], KVSData], self: idAddress) => (key: Seq[Byte], idam: IdAddressMessage) => {
-    idam.idaddress.get.getClient(self).setChunk(key, toMove(key))
+    idam.idaddress.get.getTransmitter.setChunk(key, toMove(key))
   }
 }

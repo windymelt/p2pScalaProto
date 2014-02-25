@@ -35,7 +35,7 @@ class FingerStabilizer(watcher: NodeWatcher) {
     cs.copy(fingerList = NodeList(newList))
   }
 
-  private def getNewIdAddress(cs: ChordState, idx: Int): Option[idAddress] = Await.result(cs.selfID.get.getClient(cs.selfID.get).findNode(new nodeID(BigInt(2).pow(idx).toByteArray)), 10 second).idaddress
+  private def getNewIdAddress(cs: ChordState, idx: Int): Option[idAddress] = Await.result(cs.selfID.get.getTransmitter.findNode(new nodeID(BigInt(2).pow(idx).toByteArray)), 10 second).idaddress
 
   private def watch(a: ActorRef): Unit = watcher.watch(a)
 

@@ -26,6 +26,7 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
       m match {
         case StartStabilize => start()
         case StopStabilize => stop()
+        case StabilizeStatus => sender ! isStarted()
       }
     case _ => unhandled("unknown message")
   }

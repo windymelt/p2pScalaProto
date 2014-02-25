@@ -26,7 +26,7 @@ case class ChordState(
     fingerList: NodeList,
     pred: Option[idAddress],
     dataholder: HashMap[Seq[Byte], KVSData],
-    stabilizer: ActorRef) {
+    stabilizer: StabilizerController) {
   def dropNode(a: ActorRef): ChordState = {
     this.copy(selfID, succList.remove(a), fingerList.replace(a, selfID.get), pred.flatMap((i) => if (i.a == a) None else i.some), dataholder, stabilizer)
   }
@@ -76,11 +76,11 @@ object ChordState {
     implicit txn =>
       for {
         selfID <- state().selfID
-        mightBeNewSuccessor <- (allCatch opt Await.result(target.getClient(selfID).findNode(selfID), 10 second).idaddress).flatten[idAddress]
+        mightBeNewSuccessor <- (allCatch opt Await.result(target.getTransmitter.findNode(selfID), 10 second).idaddress).flatten[idAddress]
         _ <- (state send {
           _.copy(succList = NodeList(List[idAddress](mightBeNewSuccessor).toNel.get), pred = None)
         }).some
-        _ <- (state().stabilizer ! StartStabilize).some
+        _ <- (state().stabilizer.start).some
       } yield mightBeNewSuccessor
   }
 
@@ -97,11 +97,11 @@ object ChordState {
         } | (cs, None)
     }
 
-  private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getClient(sid).findNode(sid), 10 second).idaddress
+  private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getTransmitter.findNode(sid), 10 second).idaddress
 
   private def regenerateState(cs: ChordState, newSucc: idAddress): ChordState = cs.copy(succList = NodeList(List[idAddress](newSucc).toNel.get), pred = None)
 
-  private def startStabilize(cs: ChordState): Unit = cs.stabilizer ! StartStabilize
+  private def startStabilize(cs: ChordState): Unit = cs.stabilizer.start()
 
   /**
    * あるノードIDを管轄するノードを検索します。
@@ -125,7 +125,7 @@ object ChordState {
 
           isQueryBelongsNearest match {
             case true =>
-              val cliNrst = id_nearest.getClient(selfid = csa().selfID.get)
+              val cliNrst = id_nearest.getTransmitter
               val address: Option[idAddress] = (id_nearest.getNodeID == csa().selfID.get.getNodeID) match {
                 case true => csa().selfID
                 case false => cliNrst.whoAreYou
@@ -158,7 +158,7 @@ object ChordState {
   def yourPredecessor(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
     context.system.log.debug("YourPredecessorCore")
     // ここでもsuccの自動変更が必要？
-    cs.stabilizer ! StartStabilize
+    cs.stabilizer.start()
     cs.pred
   }
 
@@ -219,7 +219,7 @@ object ChordState {
             _.copy(succList = NodeList(List(addr)))
           }
         }
-        agt().stabilizer ! StartStabilize
+        agt().stabilizer.start()
         context.watch(addr.actorref)
       }
 

@@ -51,6 +51,14 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
     }
   }
 
+  def predecessorOf(ida: idAddress): Option[idAddress] = {
+    Await.result(ida.getTransmitter.yourPredecessor, 10 second).idaddress
+  }
+
+  def availabilityOf(ida: idAddress): Boolean = {
+    ida.getTransmitter.checkLiving
+  }
+
   /**
    * Successorが死んでいるかどうかを返します。
    * @param state ChordState
@@ -59,11 +67,12 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
   def isSuccDead(state: ChordState): Boolean = {
     try {
       state.succList.nearestSuccessor(id_self = state.selfID.get) match {
-        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false
-        case nrst => !nrst.getClient(state.selfID.get).checkLiving
+        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false // 自分と同じIDの場合は死んでいない
+        case nrst => !availabilityOf(nrst)
       }
     } catch {
       case e: Exception =>
+        // とりあえず生きてるってことにする
         logger.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
         false
     }
@@ -78,12 +87,10 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
       state.succList.nearestSuccessor(state.selfID.get) match {
         case succ if succ == state.selfID.get => false // 死んでいないものとして扱う
         case succ =>
-          val cli_next: Transmitter = succ.getClient(state.selfID.get)
-
-          Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
+          predecessorOf(succ) match {
             case None => true
             case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
-            case Some(preNext) => !preNext.getClient(state.selfID.get).checkLiving
+            case Some(preNext) => !availabilityOf(preNext)
           }
       }
     } catch {
@@ -102,7 +109,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
       case Some(v) =>
         v match {
           case ida if ida.getNodeID == state.selfID.get.getNodeID => true
-          case ida => ida.getClient(state.selfID.get).checkLiving
+          case ida => availabilityOf(ida)
         }
       case None => false
     }
@@ -122,7 +129,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
         state.selfID.get.getNodeID == Succ.getNodeID match {
           case true => false // 自分が孤独状態ならすぐに譲る
           case false =>
-            Await.result(Succ.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress match {
+            predecessorOf(Succ) match {
               case None => true
               case Some(preSucc) => state.selfID.get.belongs_between(preSucc).and(Succ) || Succ == preSucc
             }
@@ -138,8 +145,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
     // 閉鎖状態の場合で分け
     state.succList.nearestSuccessorWithoutSelf(state.selfID.get) match {
       case Some(ida: idAddress) =>
-        val preSucc: Option[idAddress] = Await.result(ida.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress
-        preSucc match {
+        predecessorOf(ida) match {
           case None =>
             sys.error("到達しないはず")
             false // 到達しないはず

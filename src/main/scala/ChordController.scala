@@ -39,7 +39,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
 
     log.info("state initialized")
 
-    Await.result(stateAgt.future(), 10 seconds).stabilizer ! StartStabilize
+    Await.result(stateAgt.future(), 10 seconds).stabilizer.start()
 
     log.info("initialization successful: " + stateAgt().toString)
   }
@@ -48,13 +48,18 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
    * DHTネットワークに参加します。
    * @param to ブートストラップとして用いるノード。
    */
-  def join(to: idAddress) = {
+  def join(to: idAddress): Option[Boolean] = {
     val newSucc = ChordState.joinNetwork(to, stateAgt)
-    newSucc >>= {
-      ida =>
-        watcher.watch(ida.actorref)
-        ida.getClient(stateAgt().selfID.get).amIPredecessor()
-        true.some
+    stateAgt().selfID >>= {
+      self =>
+        newSucc >>= {
+          ida =>
+            watcher.watch(ida.actorref)
+            stateAgt send { _.copy(pred = ida.some) }
+            stateAgt().stabilizer.start()
+            ida.getTransmitter.amIPredecessor(self)
+            true.some
+        }
     }
   }
 
@@ -116,7 +121,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
     nearest match {
       case Some(nrst) =>
         log.info("stopping stabilizer...")
-        stateAgt().stabilizer ! StopStabilize
+        stateAgt().stabilizer.stop()
         log.info("transferring data to other nodes...")
         stateAgt().dataholder.foreach {
           case (key: Seq[Byte], value: KVSData) => SetChunk(key, value).!?[Option[Seq[Byte]]](nrst)
@@ -124,7 +129,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
         log.info("transferring complete.")
         ACK
       case None =>
-        stateAgt().stabilizer ! StopStabilize
+        stateAgt().stabilizer.stop()
         ACK
     }
   }
@@ -154,7 +159,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
     val digestFactory = MessageDigest.getInstance("SHA-1")
 
     /* ----- Begin of declaring helper functions -----*/
-    implicit val selfTransmitter: Transmitter = stateAgt().selfID.get.getClient(stateAgt().selfID.get)
+    implicit val selfTransmitter: Transmitter = stateAgt().selfID.get.getTransmitter
     log.debug("Transmitter prepared.")
 
     def findNodeForChunk(id: ChunkID)(implicit selfTransmitter: Transmitter) =
@@ -164,7 +169,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
       val savedDataKeys: Stream[Option[ChunkID]] = data.grouped(1024).map {
         (chunk: Stream[Byte]) =>
           val digestOfChunk = digestFactory.digest(chunk.toArray).toSeq
-          findNodeForChunk(digestOfChunk).getClient(stateAgt().selfID.get)
+          findNodeForChunk(digestOfChunk).getTransmitter
             .setChunk(digestOfChunk, KVSValue(chunk))
       }.toStream
       savedDataKeys.sequence[Option, ChunkID]
@@ -186,7 +191,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
 
     def saveMetadata(metaData: MetaData): Option[ChunkID] = {
       val digestOfMetadata = digestFactory.digest(metaData.toString.getBytes)
-      val saveTarget = findNodeForChunk(digestOfMetadata).getClient(stateAgt().selfID.get)
+      val saveTarget = findNodeForChunk(digestOfMetadata).getTransmitter
       saveTarget.setChunk(digestOfMetadata.toSeq, metaData)
       digestOfMetadata.toSeq.some
     }
@@ -212,12 +217,12 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
       log.debug("loaddata: Loading data from DHT.")
       //log.debug("state: " + state.toString)
 
-      val nd = stateAgt().selfID.get.getClient(stateAgt().selfID.get)
+      val nd = stateAgt().selfID.get.getTransmitter
       val findnodeF = nd.findNode(nodeID(key.toArray))
       log.debug("loaddata: findnode future fetched")
       val addr: idAddress = Await.result(findnodeF, 50 second).idaddress | stateAgt().selfID.get
       log.debug("loaddata: findnode done.")
-      val byte_meta: Option[KVSData] = addr.getClient(stateAgt().selfID.get).getChunk(key)
+      val byte_meta: Option[KVSData] = addr.getTransmitter.getChunk(key)
       log.debug(s"loaddata: Metadata has loaded: $byte_meta")
 
       val concat = (L: Seq[KVSValue], R: Seq[KVSValue]) => L ++ R
@@ -231,10 +236,11 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
       val key2chunk = (key: Seq[Byte]) => // Validationの利用？
         for {
           _ <- log.debug(s"finding chunk for: ${nodeID(key.toArray).getBase64}").point[Option]
-          addr <- Tags.First(Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress) |+| Tags.First(stateAgt().selfID) // findNodeに失敗したらself
+          addr <- stateAgt().selfID >> Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress
+          //addr <- Tags.First(Await.result(nd.findNode(nodeID(key.toArray)), 50 second).idaddress) |+| Tags.First(stateAgt().selfID) // findNodeに失敗したらself
           _ <- log.debug(s"addr for key: $addr").point[Option]
           selfid <- stateAgt().selfID
-          transmitter <- addr.getClient(selfid).some
+          transmitter <- addr.getTransmitter.some
           chunk <- transmitter.getChunk(key)
         } yield chunk
 
