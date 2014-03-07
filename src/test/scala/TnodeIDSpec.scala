@@ -46,6 +46,19 @@ class TnodeIDSpec extends Specification {
       (id_100000 belongs_between id_0 and id_1000) must beFalse
     }
 
+    "右端では反応する" in {
+      (id_100000 belongs_between id_1000 and id_100000) must beTrue
+    }
+
+    "左端では反応しない" in {
+      (id_0 belongs_between id_0 and id_1000) must beFalse
+      (id_1000 belongs_between id_1000 and id_100000) must beFalse
+    }
+
+    "x == yのときは反応する" in {
+      (id_0 belongs_between id_0 and id_0) must beTrue
+    }
+
     "左向き距離が正しく計算できる" in {
       TnodeID.leftArrowDistance(to = id_0, from = id_1000) must_== BigInt(1000)
       TnodeID.leftArrowDistance(to = id_1000, from = id_0) must_== OMEGA - BigInt(1000)

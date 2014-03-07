@@ -80,7 +80,7 @@ object ChordState {
         _ <- (state send {
           _.copy(succList = NodeList(List[idAddress](mightBeNewSuccessor).toNel.get), pred = None)
         }).some
-        _ <- (state().stabilizer.start).some
+        _ <- (state().stabilizer.start()).some
       } yield mightBeNewSuccessor
   }
 
@@ -147,7 +147,7 @@ object ChordState {
    */
   val yourSuccessor: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.selfID map {
     selfID => cs.succList.nearestSuccessor(selfID)
-  } //cs.succList.last.some
+  } //state.succList.last.some
 
   /**
    * 自分のPredecessorを返します。
@@ -191,9 +191,8 @@ object ChordState {
               pred =>
                 {
                   sender.belongs_between(pred).and(st.selfID.get) ||
-                    st.selfID.get == pred ||
+                    pred == st.selfID.get ||
                     st.succList.nearestSuccessor(st.selfID.get).getNodeID == st.selfID.get.getNodeID
-
                 }
             }) | false // pred = Noneの場合も考慮
             val isPredDead = !new successorStabilizationFactory(context, context.system.log).isPredLiving(st) // 副作用あり

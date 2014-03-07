@@ -46,17 +46,18 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
 
   /**
    * DHTネットワークに参加します。
-   * @param to ブートストラップとして用いるノード。
+   * @param bootstrapNode ブートストラップとして用いるノード。
    */
-  def join(to: idAddress): Option[Boolean] = {
-    val newSucc = ChordState.joinNetwork(to, stateAgt)
+  def join(bootstrapNode: idAddress): Option[Boolean] = {
+    log.info(s"Joining network via bootstrap node ${bootstrapNode.getBase64} ...")
+    val newSucc = ChordState.joinNetwork(bootstrapNode, stateAgt)
     stateAgt().selfID >>= {
       self =>
         newSucc >>= {
           ida =>
+            log.info(s"Joined network: new Successor is ${ida.getBase64} ; Setting predecessor...")
             watcher.watch(ida.actorref)
             stateAgt send { _.copy(pred = ida.some) }
-            stateAgt().stabilizer.start()
             ida.getTransmitter.amIPredecessor(self)
             true.some
         }
@@ -95,8 +96,9 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
    */
   def stabilize() = spawn {
     log.debug("Stabilizing stimulated")
-    val strategy = new successorStabilizationFactory(context, context.system.log).autoGenerate(stateAgt())
-    log.debug("Strategy done: " + strategy.toString())
+    //val strategy = new successorStabilizationFactory(context, context.system.log).autoGenerate(stateAgt())
+    stateAgt send new NewStabilizer(context, context.system.log).stabilize
+    //log.debug("Strategy done: " + strategy.toString())
     stateAgt send fingerStabilizer.stabilize
     log.debug("fingertable stabilized")
   }

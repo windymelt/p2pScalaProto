@@ -110,7 +110,7 @@ trait TnodeID {
   def belongs_between(x: TnodeID) = {
     lazy val self = this
     new {
-      def and(y: TnodeID): Boolean = (self <----- y) < (x <----- y)
+      def and(y: TnodeID): Boolean = if (x == y) true else { (self <----- y) < (x <----- y) }
     }
   }
 

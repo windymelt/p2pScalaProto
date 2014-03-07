@@ -41,7 +41,7 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
     isStarted() match {
       case false =>
         log.debug("stabilizer started")
-        scheduler = context.system.scheduler.schedule(10 seconds, 30 seconds, chord, message)
+        scheduler = context.system.scheduler.schedule(3 seconds, 5 seconds, chord, message)
         isStarted send true
       case true => // do nothing
     }
