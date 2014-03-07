@@ -21,12 +21,12 @@ import scala.util.control.Exception._
  * @param stabilizer 安定化処理を行なうためのタイマ
  */
 case class ChordState(
-                       selfID: Option[idAddress],
-                       succList: NodeList,
-                       fingerList: NodeList,
-                       pred: Option[idAddress],
-                       dataholder: HashMap[Seq[Byte], KVSData],
-                       stabilizer: ActorRef) {
+    selfID: Option[idAddress],
+    succList: NodeList,
+    fingerList: NodeList,
+    pred: Option[idAddress],
+    dataholder: HashMap[Seq[Byte], KVSData],
+    stabilizer: StabilizerController) {
   def dropNode(a: ActorRef): ChordState = {
     this.copy(selfID, succList.remove(a), fingerList.replace(a, selfID.get), pred.flatMap((i) => if (i.a == a) None else i.some), dataholder, stabilizer)
   }
@@ -76,31 +76,32 @@ object ChordState {
     implicit txn =>
       for {
         selfID <- state().selfID
-        mightBeNewSuccessor <- (allCatch opt Await.result(target.getClient(selfID).findNode(selfID), 10 second).idaddress).flatten[idAddress]
+        mightBeNewSuccessor <- (allCatch opt Await.result(target.getTransmitter.findNode(selfID), 10 second).idaddress).flatten[idAddress]
         _ <- (state send {
           _.copy(succList = NodeList(List[idAddress](mightBeNewSuccessor).toNel.get), pred = None)
         }).some
-        _ <- (state().stabilizer ! StartStabilize).some
+        _ <- (state().stabilizer.start()).some
       } yield mightBeNewSuccessor
   }
 
   val joinNetworkS: idAddress => State[ChordState, Option[idAddress]] = (target: idAddress) =>
     State[ChordState, Option[idAddress]] {
-      cs => {
-        for {
-          sid <- cs.selfID
-          newSucc <- (allCatch opt findSelf(target, sid)).flatten[idAddress]
-          newState <- regenerateState(cs, newSucc).some
-          _ <- startStabilize(newState).some
-        } yield (newState, newSucc.some)
-      } |(cs, None)
+      cs =>
+        {
+          for {
+            sid <- cs.selfID
+            newSucc <- (allCatch opt findSelf(target, sid)).flatten[idAddress]
+            newState <- regenerateState(cs, newSucc).some
+            _ <- startStabilize(newState).some
+          } yield (newState, newSucc.some)
+        } | (cs, None)
     }
 
-  private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getClient(sid).findNode(sid), 10 second).idaddress
+  private def findSelf(target: idAddress, sid: idAddress): Option[idAddress] = Await.result(target.getTransmitter.findNode(sid), 10 second).idaddress
 
   private def regenerateState(cs: ChordState, newSucc: idAddress): ChordState = cs.copy(succList = NodeList(List[idAddress](newSucc).toNel.get), pred = None)
 
-  private def startStabilize(cs: ChordState): Unit = cs.stabilizer ! StartStabilize
+  private def startStabilize(cs: ChordState): Unit = cs.stabilizer.start()
 
   /**
    * あるノードIDを管轄するノードを検索します。
@@ -124,7 +125,7 @@ object ChordState {
 
           isQueryBelongsNearest match {
             case true =>
-              val cliNrst = id_nearest.getClient(selfid = csa().selfID.get)
+              val cliNrst = id_nearest.getTransmitter
               val address: Option[idAddress] = (id_nearest.getNodeID == csa().selfID.get.getNodeID) match {
                 case true => csa().selfID
                 case false => cliNrst.whoAreYou
@@ -146,7 +147,7 @@ object ChordState {
    */
   val yourSuccessor: (ChordState) => Option[idAddress] = (cs: ChordState) => cs.selfID map {
     selfID => cs.succList.nearestSuccessor(selfID)
-  } //cs.succList.last.some
+  } //state.succList.last.some
 
   /**
    * 自分のPredecessorを返します。
@@ -157,7 +158,7 @@ object ChordState {
   def yourPredecessor(cs: ChordState)(implicit context: ActorContext): Option[idAddress] = {
     context.system.log.debug("YourPredecessorCore")
     // ここでもsuccの自動変更が必要？
-    cs.stabilizer ! StartStabilize
+    cs.stabilizer.start()
     cs.pred
   }
 
@@ -177,7 +178,7 @@ object ChordState {
     // ----- //
     val check: (ChordState) => Boolean =
       (st) => allCatch.opt {
-        context.system.log.debug("ChordState: checking my predecessor")
+        context.system.log.info("ChordState: checking my predecessor")
 
         // when pred is self?
         val isSenderSelf = st.selfID.get.getNodeID == sender.getNodeID
@@ -187,17 +188,14 @@ object ChordState {
           case false =>
             val isPredEmpty = st.pred.isEmpty
             val isSaidNodeBetter = (st.pred map {
-              pred => {
-                sender.belongs_between(pred).and(st.selfID.get) ||
-                  st.selfID.get == pred /*||
-                  (
-                    !st.succList.nodes.empty
-                && st.succList.nearestSuccessorWithoutSelf(st.selfID.get).flatMap(ida => Some(ida == pred)).getOrElse(false)
-                    )
-                    */
-              }
+              pred =>
+                {
+                  sender.belongs_between(pred).and(st.selfID.get) ||
+                    pred == st.selfID.get ||
+                    st.succList.nearestSuccessor(st.selfID.get).getNodeID == st.selfID.get.getNodeID
+                }
             }) | false // pred = Noneの場合も考慮
-          val isPredDead = !new successorStabilizationFactory().isPredLiving(st) // 副作用あり
+            val isPredDead = !new successorStabilizationFactory(context, context.system.log).isPredLiving(st) // 副作用あり
             isPredEmpty ∨ isSaidNodeBetter ∨ isPredDead
         }
       } | false
@@ -220,7 +218,7 @@ object ChordState {
             _.copy(succList = NodeList(List(addr)))
           }
         }
-        agt().stabilizer ! StartStabilize
+        agt().stabilizer.start()
         context.watch(addr.actorref)
       }
 

@@ -2,7 +2,7 @@ package momijikawa.p2pscalaproto
 
 import akka.actor.ActorRef
 import akka.util.Timeout
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{ Await, Future }
 import akka.pattern.ask
 import scala.reflect.ClassTag
 import scala.concurrent.duration._

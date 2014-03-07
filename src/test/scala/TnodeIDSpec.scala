@@ -2,11 +2,6 @@ package momijikawa.p2pscalaproto.test
 
 import org.specs2.mutable._
 import momijikawa.p2pscalaproto._
-import scala.concurrent.ExecutionContext
-import akka.actor.ActorSystem.Settings
-import akka.dispatch.{Dispatchers, Mailboxes}
-import akka.event.{LoggingAdapter, EventStream}
-import scala.concurrent.duration.Duration
 
 class TnodeIDSpec extends Specification {
 
@@ -51,10 +46,17 @@ class TnodeIDSpec extends Specification {
       (id_100000 belongs_between id_0 and id_1000) must beFalse
     }
 
-    "belongs_between(x).and(y)構文は(x, y]の左開右閉区間にのみヒットする" in {
-      (id_1000 belongs_between id_0 and id_100000) must beTrue // xではfalse
-      (id_0 belongs_between id_0 and id_100000) must beFalse
-      (id_100000 belongs_between id_0 and id_100000) must beTrue // yではtrue
+    "右端では反応する" in {
+      (id_100000 belongs_between id_1000 and id_100000) must beTrue
+    }
+
+    "左端では反応しない" in {
+      (id_0 belongs_between id_0 and id_1000) must beFalse
+      (id_1000 belongs_between id_1000 and id_100000) must beFalse
+    }
+
+    "x == yのときは反応する" in {
+      (id_0 belongs_between id_0 and id_0) must beTrue
     }
 
     "左向き距離が正しく計算できる" in {
@@ -72,28 +74,6 @@ class TnodeIDSpec extends Specification {
     "左向き距離は同じノード間の演算に対しては0を返す" in {
       id_0 <----- id_0 must_== BigInt(0)
       id_1000 <----- id_1000 must_== BigInt(0)
-    }
-  }
-
-  "idAddress" should {
-    import akka.actor._
-    import ActorDSL._
-    "equalが正しく動作する" in {
-      implicit val system = ActorSystem("test")
-      val act = actor(new Act {
-        become {
-          case x => sender ! x
-        }
-      })
-      val recvr1 = act
-      val recvr2 = recvr1
-      val nodeid = new nodeID(Array[Byte](0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-      val ida1 = idAddress(nodeid.bytes, recvr1)
-      val ida2 = idAddress(nodeid.bytes, recvr2)
-
-      ida1 must_== ida2
-      val ida3 = ida1
-      ida1 must_== ida3
     }
   }
 }

@@ -12,6 +12,8 @@ import scala.concurrent.duration._
 import akka.agent.Agent
 import scala.concurrent.stm._
 import akka.actor.ActorContext
+import LoggerLikeObject._
+import WatchableObject._
 
 /**
  * ノードの安定化に用いるパターンのトレイト。
@@ -24,11 +26,7 @@ trait stabilizationStrategy {
     //println(this.toString)
   }
 
-  def tellAmIPredecessor(ida: idAddress, self: idAddress): Unit = ida.getClient(self).amIPredecessor()
-
-  def watch(ida: idAddress)(implicit context: ActorContext): Unit = context.watch(ida.a)
-
-  def unwatch(ida: idAddress)(implicit context: ActorContext): Unit = context.unwatch(ida.a)
+  def tellAmIPredecessor(ida: idAddress, self: idAddress): Unit = ida.getTransmitter.amIPredecessor(self)
 }
 
 /**
@@ -36,9 +34,8 @@ trait stabilizationStrategy {
  * Successorとの通信ができないときのパターンです。まずSuccessorのリストから次のSuccessor候補を探し出し接続しようとし、
  * 失敗した場合はPredecessorとの接続を試行しますが、失敗した場合は安定化処理を中止します。
  */
-case class SuccDeadStrategy(ctx: ActorContext) extends stabilizationStrategy {
+case class SuccDeadStrategy(watcher: Watchable, logger: LoggerLike) extends stabilizationStrategy {
 
-  implicit val context = ctx
   /**
    * Successorが死んでいるものとみなし、Successorのリストを再構築します。
    * @return ストラテジを返します。
@@ -47,6 +44,7 @@ case class SuccDeadStrategy(ctx: ActorContext) extends stabilizationStrategy {
     cs =>
       atomic {
         implicit txn =>
+          logger.info("INVOKED: SuccDeadStrategy")
           super.before()
           val newcs = cs.succList.nodes.size ?|? 1 match {
             case GT => recoverSuccList(cs) // SuccListに余裕があるとき
@@ -78,19 +76,21 @@ case class SuccDeadStrategy(ctx: ActorContext) extends stabilizationStrategy {
   }
 
   def recoverSuccList(cs: ChordState): ChordState = {
-    unwatch(cs.succList.nearestSuccessor(cs.selfID.get))
+    watcher.unwatch(cs.succList.nearestSuccessor(cs.selfID.get).actorref)
     val newState = cs.copy(succList = cs.succList.killNearest(cs.selfID.get))
     joinNetwork(newState, newState.succList.nearestSuccessor(newState.selfID.get))._1 // TODO: predも使用できる
   }
 
-  def stopStabilize(cs: ChordState) = cs.stabilizer ! StopStabilize
+  def stopStabilize(cs: ChordState) = cs.stabilizer.stop()
 
   def joinNetwork(cs: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(cs)
 }
 
-case class PreSuccDeadStrategy(ctx: ActorContext) extends stabilizationStrategy {
+case class PreSuccDeadStrategy(logger: LoggerLike) extends stabilizationStrategy {
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
+      logger.info("INVOKED: PreSuccDeadStrategy")
       super.before()
       cs.selfID >>= {
         self =>
@@ -105,9 +105,11 @@ case class PreSuccDeadStrategy(ctx: ActorContext) extends stabilizationStrategy 
  * 自分がSuccessorの正当なPredecessorである場合のストラテジです。
  * Successorに対してPredecessorを確認し、変更すべきことを通知します。
  */
-case class RightStrategy(ctx: ActorContext) extends stabilizationStrategy {
+case class RightStrategy(logger: LoggerLike) extends stabilizationStrategy {
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
+      logger.info("INVOKED: RightStrategy")
       super.before()
       cs.selfID >>= {
         self =>
@@ -121,36 +123,37 @@ case class RightStrategy(ctx: ActorContext) extends stabilizationStrategy {
  * 自分がSuccessorの正当なPredecessorではない場合のストラテジです。
  * SuccessorをSuccessorのPredecessorに変更します。SuccessorのPredecessorが利用できないときは、[[momijikawa.p2pscalaproto.PreSuccDeadStrategy]]に処理を渡します。
  */
-case class GaucheStrategy(ctx: ActorContext) extends stabilizationStrategy {
-  implicit val context = ctx
+case class GaucheStrategy(watcher: Watchable, logger: LoggerLike) extends stabilizationStrategy {
+
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
       atomic {
         implicit txn =>
+          logger.info("INVOKED: GaucheStrategy")
           super.before()
           val preSucc = getPreSucc(cs)
 
           preSucc match {
             case Some(v) =>
               val renewedcs: State[ChordState, ChordState] = for {
-                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => unwatch(ida)))
+                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => watcher.unwatch(ida.actorref)))
                 _ <- modify[ChordState](_.copy(succList = NodeList(List[idAddress](v))))
                 newcs <- get[ChordState]
                 _ <- Utility.Utility.pass(tellAmIPredecessor(newcs.succList.nearestSuccessor(newcs.selfID.get), newcs.selfID.get))
-                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => watch(ida)))
+                _ <- gets[ChordState, Unit](st => st.succList.nodes.list.foreach(ida => watcher.watch(ida.actorref)))
               } yield newcs
 
-              watch(v)
+              watcher.watch(v.actorref)
               (renewedcs.run(cs)._1, this)
 
             case None =>
-              new PreSuccDeadStrategy(context).doStrategy(cs)
+              new PreSuccDeadStrategy(logger).doStrategy(cs)
           }
       }
   }
 
   def getPreSucc(cs: ChordState): Option[idAddress] = {
-    Await.result(cs.succList.nearestSuccessor(cs.selfID.get).getClient(cs.selfID.get).yourPredecessor, 10 second).idaddress
+    Await.result(cs.succList.nearestSuccessor(cs.selfID.get).getTransmitter.yourPredecessor, 10 second).idaddress
   }
 
 }
@@ -159,11 +162,9 @@ case class GaucheStrategy(ctx: ActorContext) extends stabilizationStrategy {
  * 通常時のストラテジです。
  * Successorを増やし、データの異動が必要な場合は転送します。
  */
-case class NormalStrategy(ctx: ActorContext) extends stabilizationStrategy {
+case class NormalStrategy(watcher: Watchable, logger: LoggerLike) extends stabilizationStrategy {
 
   import scala.concurrent.ExecutionContext.Implicits.global
-
-  implicit val context = ctx
 
   val doStrategy = State[ChordState, stabilizationStrategy] {
     cs =>
@@ -174,26 +175,28 @@ case class NormalStrategy(ctx: ActorContext) extends stabilizationStrategy {
   }
 
   val increaseSuccessor = (cs: ChordState) => {
-    ctx.system.log.debug("going to add successor")
+    logger.debug("going to add successor")
 
     val succ = cs.succList.nearestSuccessor(id_self = cs.selfID.get) // assuming not null
+    val genList = (suc: idAddress) => (operation: idAddress => Option[idAddress]) => (length: Int) =>
+      unfold(suc)(_ |> operation map (_.squared)).take(length).toList
     val newSuccList: Option[List[idAddress]] = cs.selfID >>= {
-        selfid =>
-          Utility.failableRecursiveList[idAddress](ida => Await.result(ida.getClient(selfid).yourSuccessor, 10 second).idaddress, Some(succ), 4)
-      }
+      selfid =>
+        genList(succ)(ida => Await.result[IdAddressMessage](ida.getTransmitter.yourSuccessor, 10 seconds).idaddress)(4).some
+    }
 
     newSuccList match {
       case Some(lis) =>
         cs.copy(succList = NodeList(lis))
       case None => {
-        ctx.system.log.warning("failed to increase successor");
+        logger.warning("failed to increase successor");
         cs
       }
     }
   }
 
   val watchRegistNodes = (cs: ChordState) => {
-    cs.succList.nodes.list.foreach(ida => watch(ida))
+    cs.succList.nodes.list.foreach(ida => watcher.watch(ida.actorref))
     cs
   }
 
@@ -214,6 +217,7 @@ case class NormalStrategy(ctx: ActorContext) extends stabilizationStrategy {
   def listUpToMove(cs: ChordState): Map[Seq[Byte], KVSData] = {
     cs.dataholder.filterKeys {
       (key: Seq[Byte]) =>
+        logger.info(s"Combined SuccFingerList: ${(cs.succList.nodes.list ++ cs.fingerList.nodes.list).mkString("{", ", ", "}")}")
         nodeID(key.toArray).belongs_between(cs.selfID.get).and(cs.succList.nearestSuccessor(cs.selfID.get)) ||
           !nodeID(key.toArray).belongs_between(cs.selfID.get).and(NodeList(cs.succList.nodes.list ++ cs.fingerList.nodes.list).nearestNeighbor(nodeID(key.toArray), cs.selfID.get))
     }
@@ -222,11 +226,11 @@ case class NormalStrategy(ctx: ActorContext) extends stabilizationStrategy {
   def findContainerNode(self: idAddress, map: Map[Seq[Byte], KVSData]): Map[Seq[Byte], IdAddressMessage] = {
     map map {
       (f: (Seq[Byte], KVSData)) =>
-        (f._1, Await.result(self.getClient(self).findNode(nodeID(f._1.toArray)), 50 second))
+        (f._1, Await.result(self.getTransmitter.findNode(nodeID(f._1.toArray)), 50 second))
     }
   }
 
   val moveChunk = (toMove: Map[Seq[Byte], KVSData], self: idAddress) => (key: Seq[Byte], idam: IdAddressMessage) => {
-    idam.idaddress.get.getClient(self).setChunk(key, toMove(key))
+    idam.idaddress.get.getTransmitter.setChunk(key, toMove(key))
   }
 }

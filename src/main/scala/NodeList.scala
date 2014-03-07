@@ -12,7 +12,19 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
   def nearestNeighbor(id_query: TnodeID, id_self: TnodeID): idAddress = {
     nodes.list.filter(id_query.belongs_between(id_self).and(_))
       .minBy {
-      distanceFrom(_) to id_query
+        distanceFrom(_) to id_query
+      }
+  }
+
+  def nearestNeighborWithoutSelf(id_query: TnodeID, id_self: TnodeID): Option[idAddress] = {
+    nodes.list.filterNot(_.getNodeID == nodeID(id_self.getArray())) match {
+      case lis: List[idAddress] if lis.isEmpty => None
+      case lis: List[idAddress] =>
+        Some(lis.filter(id_query.belongs_between(id_self).and(_))
+          .minBy {
+            distanceFrom(_) to id_query
+          }
+        )
     }
   }
 

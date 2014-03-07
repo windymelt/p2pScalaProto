@@ -10,9 +10,8 @@ import akka.util.Timeout
 /**
  * アクター間のメッセージパッシングを同期式のメソッドとしてラッピングします。
  * @param remote 送り宛
- * @param selfId 差出人
  */
-class Transmitter(remote: ActorRef, selfId: idAddress) {
+class Transmitter(remote: ActorRef) {
 
   import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -46,7 +45,7 @@ class Transmitter(remote: ActorRef, selfId: idAddress) {
     (RemoteActor.forward(FindNode(id_query.getBase64))).asInstanceOf[IdAddressMessage].idaddress.get
   }
 
-  def amIPredecessor() = RemoteActor ! AmIPredecessor(selfId)
+  def amIPredecessor(selfId: idAddress) = RemoteActor ! AmIPredecessor(selfId)
 
   def yourPredecessor: Future[IdAddressMessage] = (RemoteActor ? YourPredecessor).mapTo[IdAddressMessage]
 
