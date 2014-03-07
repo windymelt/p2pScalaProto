@@ -31,8 +31,8 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
       case Stabilize => handler.stabilize()
       case InitNode(id) =>
         handler.init(id, self); sender ! ACK
-      case JoinNode(connectTo) =>
-        handler.join(connectTo); sender ! ACK
+      case JoinNode(bootstrapNode) =>
+        handler.join(bootstrapNode); sender ! ACK
       case GetData(key) => sender ! handler.loadData(key)
       case PutData(title, value) => sender ! handler.saveData(title, value)
       case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)

@@ -17,7 +17,7 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
   override val actorref = a
 
   override def equals(obj: Any) = obj match {
-    case that: idAddress => id.deep == that.id.deep && a.toString() == that.a.toString()
+    case that: idAddress => id.deep == that.id.deep && a == that.a
     case otherwise => false
   }
 
@@ -50,7 +50,7 @@ object idAddress {
     import scala.concurrent.Await
     import scala.util.matching.Regex
 
-    val Matcher = new Regex( """([a-zA-Z0-9=\\\+]+)@(.+):(\d+)""", "id", "host", "name")
+    val Matcher = new Regex("""([a-zA-Z0-9=\\\+]+)@(.+):(\d+)""", "id", "host", "name")
 
     str match {
       case Matcher(id, host, port) =>
@@ -65,8 +65,8 @@ object idAddress {
 trait TActorRef {
   def actorref: ActorRef
 
-  def getClient(selfid: idAddress): Transmitter = {
-    new Transmitter(actorref, selfid)
+  def getTransmitter: Transmitter = {
+    new Transmitter(actorref)
   }
 }
 
@@ -107,12 +107,10 @@ trait TnodeID {
   def <->(x: TnodeID) = TnodeID.distance(this, x)
 
   /** シュガーシンタックス */
-  // (x, y]のときにhitする。
-  // TODO: test^^^
   def belongs_between(x: TnodeID) = {
     lazy val self = this
     new {
-      def and(y: TnodeID): Boolean = (self <----- y) < (x <----- y) // 等しい場合は他のノードが担当するので含めない
+      def and(y: TnodeID): Boolean = if (x == y) true else { (self <----- y) < (x <----- y) }
     }
   }
 

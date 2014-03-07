@@ -5,9 +5,11 @@ import scala.concurrent.duration._
 import akka.agent.Agent
 import scala.concurrent.stm._
 import akka.actor.ActorContext
+import WatchableObject._
+import LoggerLikeObject._
 
 // TODO: 副作用を切り出してテストしやすくする
-class successorStabilizationFactory(implicit context: ActorContext) {
+class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
 
   /**
    * [[momijikawa.p2pscalaproto.ChordState]]から自動的に戦略を生成します。
@@ -28,25 +30,33 @@ class successorStabilizationFactory(implicit context: ActorContext) {
   def generate(succdead: Boolean, presuccdead: Boolean, consistentness: Boolean, rightness: Boolean, issuccme: Boolean) = {
 
     if (issuccme) {
-      NormalStrategy(context)
+      NormalStrategy(watcher, logger)
     } else if (succdead) {
       // Successorが死んでる
-      SuccDeadStrategy(context)
+      SuccDeadStrategy(watcher, logger)
     } else if (presuccdead) {
       // SuccessorのPredecessorが死んでる
-      PreSuccDeadStrategy(context)
+      PreSuccDeadStrategy(logger)
     } else if (consistentness) {
       // 想定されるうえでふつうの状況
-      NormalStrategy(context)
+      NormalStrategy(watcher, logger)
     } else if (rightness) {
       // Successorとpre-Successorとの間に割り込む場合
-      RightStrategy(context)
+      RightStrategy(logger)
     } else {
       // Successorとpre-successorとの間に入れない場合
       // TODO: Gaucheになる基準がゆるすぎる。なぜかすぐにsuccessorがpredecessorに変異してしまう。
       // TODO: RightとGaucheを統合するべきではないか
-      GaucheStrategy(context)
+      GaucheStrategy(watcher, logger)
     }
+  }
+
+  def predecessorOf(ida: idAddress): Option[idAddress] = {
+    Await.result(ida.getTransmitter.yourPredecessor, 10 second).idaddress
+  }
+
+  def availabilityOf(ida: idAddress): Boolean = {
+    ida.getTransmitter.checkLiving
   }
 
   /**
@@ -57,12 +67,13 @@ class successorStabilizationFactory(implicit context: ActorContext) {
   def isSuccDead(state: ChordState): Boolean = {
     try {
       state.succList.nearestSuccessor(id_self = state.selfID.get) match {
-        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false
-        case nrst => !nrst.getClient(state.selfID.get).checkLiving
+        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false // 自分と同じIDの場合は死んでいない
+        case nrst => !availabilityOf(nrst)
       }
     } catch {
       case e: Exception =>
-        context.system.log.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        // とりあえず生きてるってことにする
+        logger.warning(s"Error on function [isSuccDead]: ${e.getLocalizedMessage}; treat as living")
         false
     }
   }
@@ -76,17 +87,15 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       state.succList.nearestSuccessor(state.selfID.get) match {
         case succ if succ == state.selfID.get => false // 死んでいないものとして扱う
         case succ =>
-          val cli_next: Transmitter = succ.getClient(state.selfID.get)
-
-          Await.result(cli_next.yourPredecessor, 10 second).idaddress match {
+          predecessorOf(succ) match {
             case None => true
             case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
-            case Some(preNext) => !preNext.getClient(state.selfID.get).checkLiving
+            case Some(preNext) => !availabilityOf(preNext)
           }
       }
     } catch {
       case e: Exception =>
-        context.system.log.warning(s"Error on function [isPreSuccDead]: ${e.getLocalizedMessage}; treat as living")
+        logger.warning(s"Error on function [isPreSuccDead]: ${e.getLocalizedMessage}; treat as living")
         false
     }
   }
@@ -100,7 +109,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
       case Some(v) =>
         v match {
           case ida if ida.getNodeID == state.selfID.get.getNodeID => true
-          case ida => ida.getClient(state.selfID.get).checkLiving
+          case ida => availabilityOf(ida)
         }
       case None => false
     }
@@ -120,7 +129,7 @@ class successorStabilizationFactory(implicit context: ActorContext) {
         state.selfID.get.getNodeID == Succ.getNodeID match {
           case true => false // 自分が孤独状態ならすぐに譲る
           case false =>
-            Await.result(Succ.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress match {
+            predecessorOf(Succ) match {
               case None => true
               case Some(preSucc) => state.selfID.get.belongs_between(preSucc).and(Succ) || Succ == preSucc
             }
@@ -136,13 +145,12 @@ class successorStabilizationFactory(implicit context: ActorContext) {
     // 閉鎖状態の場合で分け
     state.succList.nearestSuccessorWithoutSelf(state.selfID.get) match {
       case Some(ida: idAddress) =>
-        val preSucc: Option[idAddress] = Await.result(ida.getClient(state.selfID.get).yourPredecessor, 10 second).idaddress
-        preSucc match {
+        predecessorOf(ida) match {
           case None =>
             sys.error("到達しないはず")
             false // 到達しないはず
           case Some(pSucc) =>
-            context.system.log.info(s"checkConsistentness: (${state.selfID.get.getNodeID}, ${pSucc.getNodeID}})")
+            logger.info(s"checkConsistentness: (SELF: ${state.selfID.get.getNodeID}, SUCC: ${ida.getNodeID}, PSUCC: ${pSucc.getNodeID}})")
             state.selfID.get.getNodeID == pSucc.getNodeID
         }
       case None => true // SuccListには自分しかいないとき

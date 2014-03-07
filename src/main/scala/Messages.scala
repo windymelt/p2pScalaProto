@@ -4,7 +4,7 @@ import akka.actor._
 import akka.pattern.ask
 import scala.reflect.ClassTag
 import akka.util.Timeout
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 
 class Message {
@@ -47,6 +47,8 @@ class stabilizeMessage extends Message
 case object StartStabilize extends stabilizeMessage
 
 case object StopStabilize extends stabilizeMessage
+
+case object StabilizeStatus extends stabilizeMessage
 
 class chordMessage extends Message
 
