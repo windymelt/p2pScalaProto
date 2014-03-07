@@ -12,7 +12,6 @@ class Chord {
 
   val config = ConfigFactory.load()
   val customConf = config.getConfig("p2pakka").withFallback({
-    println("fallbacking");
     config
   })
   val system = ActorSystem("ChordCore-DHT", ConfigFactory.load(customConf))
