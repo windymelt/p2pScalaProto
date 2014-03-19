@@ -96,7 +96,10 @@ class Chord {
     import scala.concurrent.ExecutionContext.Implicits.global
     idAddress.fromString(str)(system) match {
       case Some(ida) => Future(join(ida))
-      case None => Future.failed(new Exception("Invalid node reference."))
+      case None => {
+        system.log.error("Invalid node reference.")
+        Future.failed(new Exception("Invalid node reference."))
+      }
     }
   }
 
