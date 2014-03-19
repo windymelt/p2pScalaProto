@@ -18,8 +18,8 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
 
     val self = state.selfID.get
     val succ = state.succList.nearestSuccessor(self)
-    if (succ.getNodeID == self.getNodeID) {
-      logger.info("This node is alone. Doing nothing...")
+    if (succ.asNodeID == self.asNodeID) {
+      logger.debug("This node is alone. Doing nothing...")
       state
     } else {
       succ.getTransmitter.checkLiving match {
@@ -36,7 +36,6 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
                 state |> increaseSuccessor >>> immigrateData
               }
             case None =>
-
               logger.info("Successor has no predecessor; notifying...")
               notify_to(self)(succ)
               state
@@ -97,7 +96,7 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
     val succ = state.succList.nearestSuccessor(self)
     def genList(succ: idAddress)(operation: idAddress => Option[idAddress])(length: Int): List[idAddress] = succ :: unfold(succ)(_ |> operation map (_.squared)).take(length).toList
 
-    val newSuccList: List[idAddress] = genList(succ)(ida => Await.result[IdAddressMessage](ida.getTransmitter.yourSuccessor, 10 seconds).idaddress >>= { node => if (node.getNodeID == self.getNodeID) None else node.some })(4)
+    val newSuccList: List[idAddress] = genList(succ)(ida => Await.result[IdAddressMessage](ida.getTransmitter.yourSuccessor, 10 seconds).idaddress >>= { node => if (node.asNodeID == self.asNodeID) None else node.some })(4)
 
     newSuccList match {
       case lis if lis.isEmpty => {

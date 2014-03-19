@@ -2,7 +2,7 @@ name := "P2PScalaProto"
 
 organization := "momijikawa"
 
-version := "0.2.15"
+version := "0.2.16"
 
 scalaVersion := "2.10.2"
 
@@ -28,7 +28,8 @@ libraryDependencies ++= Seq(
   "org.scalaz" %% "scalaz-scalacheck-binding" % "7.0.0" % "test",
   "com.psyonik" %% "psyonik-upnp" % "0.0.1-SNAPSHOT",
   "org.pegdown" % "pegdown" % "1.0.2",
-  "junit" % "junit" % "latest.integration" % "test"
+  "junit" % "junit" % "latest.integration" % "test",
+  "org.mockito" % "mockito-all" % "1.9.5"
 )
 
 initialCommands := "import momijikawa.p2pscalaproto._"
@@ -40,3 +41,5 @@ initialCommands in console := "import scalaz._, Scalaz._"
 publishTo := Some(Resolver.file("p2p2ch",file(Path.userHome.absolutePath+"/.m2/repository"))(Patterns(true, Resolver.mavenStyleBasePattern)))
 
 testOptions in Test += Tests.Argument(TestFrameworks.Specs2, "junitxml", "console")
+
+parallelExecution in Test := false

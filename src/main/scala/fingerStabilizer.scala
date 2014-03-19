@@ -1,43 +1,59 @@
 package momijikawa.p2pscalaproto
 
 import scalaz._
-import Scalaz._
-import scala.concurrent.Await
-import scala.concurrent.duration._
-import akka.actor.ActorRef
 import akka.agent.Agent
+import scala.concurrent.{ Await, Future }
+import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
 
+// TODO: fix description on release
 /**
  * FingerTableの安定化を行います。
  * このオブジェクトは直接動作を行いません。[[scalaz.State]]を返し、実際の動作は他所で行います。
  */
-class FingerStabilizer(watcher: NodeWatcher) {
+class FingerStabilizer(watcher: NodeWatcher, agent: Agent[ChordState]) {
 
+  // TODO: fix description on release
   /**
-   * 安定化処理を生成します。[[momijikawa.p2pscalaproto.ChordState]]を渡すと[[momijikawa.p2pscalaproto.ChordState.fingerList]]中のランダムなノードを最適なノードに置き換えます。
+   * 安定化します。[[momijikawa.p2pscalaproto.ChordState]]を渡すと[[momijikawa.p2pscalaproto.ChordState.fingerList]]中のランダムなノードを最適なノードに置き換えます。
    */
-  val stabilize: ChordState => ChordState = (cs: ChordState) => {
-    val fList = cs.fingerList.nodes.list
-    val indexToUpdate = util.Random.nextInt(fList.size - 1) + 1 // 1 to size-1 (except for 0: 2^0)
-
-    unwatch(fList(indexToUpdate).actorref)
-
-    val newIdAddress: Option[idAddress] = getNewIdAddress(cs, indexToUpdate)
-
-    val newList: List[idAddress] = {
-      newIdAddress >>= {
-        (id: idAddress) =>
-          watch(id.actorref)
-          fList.patch(indexToUpdate, Seq(id), 1).some
-      }
-    } | fList
-
-    cs.copy(fingerList = NodeList(newList))
+  def stabilizeOn(indexToUpdate: Int): Unit = {
+    // 1 to size-1 (except for 0: 2^0)
+    require(indexToUpdate >= 0 && indexToUpdate < agent().fingerList.nodes.size)
+    unwatch(agent().fingerList(indexToUpdate))
+    val newIdAddressFuture: Future[Option[idAddress]] = fetchNode(indexToUpdate)
+    newIdAddressFuture map {
+      newNode =>
+        newNode foreach watch
+        val newList = fixList(indexToUpdate, newNode, agent().fingerList)
+        val newStatus = recreateState(newList)
+        alterStatus(newStatus)
+    }
   }
 
-  private def getNewIdAddress(cs: ChordState, idx: Int): Option[idAddress] = Await.result(cs.selfID.get.getTransmitter.findNode(new nodeID(BigInt(2).pow(idx).toByteArray)), 10 second).idaddress
+  def stabilize(): Unit = stabilizeOn(generateRandomIndex)
 
-  private def watch(a: ActorRef): Unit = watcher.watch(a)
+  def generateRandomIndex = {
+    util.Random.nextInt(agent().fingerList.nodes.size - 1) + 1
+  }
 
-  private def unwatch(a: ActorRef): Unit = watcher.unwatch(a)
+  private def alterStatus(x: ChordState) = Await.result(agent.alter(x), 5 seconds)
+
+  def fetchNode(idx: Int): Future[Option[idAddress]] = {
+    val indexAsNodeID = TnodeID.fingerIdx2NodeID(idx)(agent().selfID.get.asNodeID)
+    agent().selfID.get.getTransmitter.findNode(indexAsNodeID) map { idam => idam.idaddress }
+  }
+
+  private def fixList(index: Int, node: Option[idAddress], fingerList: NodeList): NodeList = {
+    node match {
+      case Some(exactNode) => fingerList.patch(index, exactNode)
+      case None => fingerList
+    }
+  }
+
+  private def recreateState(fingerList: NodeList): ChordState = agent().copy(fingerList = fingerList)
+
+  private def watch(node: idAddress): Unit = watcher.watch(node.a)
+
+  private def unwatch(node: idAddress): Unit = watcher.unwatch(node.a)
 }

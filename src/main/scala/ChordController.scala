@@ -17,7 +17,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
 
   val watcher = new NodeWatcher(context)
   val stabilizerFactory = new StabilizerFactory(context)
-  val fingerStabilizer = new FingerStabilizer(watcher)
+  val fingerStabilizer = new FingerStabilizer(watcher, stateAgt)
   implicit val dispatcher = context.dispatcher
 
   /**
@@ -34,7 +34,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
     atomic {
       implicit txn =>
         stateAgt send (_.copy(selfID = idAddress(id.bytes, receiver).some, succList = NodeList(List(idAddress(id.bytes, receiver)))))
-        stateAgt send (_.copy(fingerList = NodeList(List.fill(10)(idAddress(id.bytes, receiver))), stabilizer = stabilizerFactory.generate(receiver)))
+        stateAgt send (_.copy(fingerList = NodeList(List.fill(160)(idAddress(id.bytes, receiver))), stabilizer = stabilizerFactory.generate(receiver)))
     }
 
     log.info("state initialized")
@@ -74,7 +74,7 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
    * 所与のノードIDを管轄するノードを検索します。
    * @param id 検索するノードID
    */
-  def findNode(id: TnodeID) = ChordState.findNode(stateAgt, id)
+  def findNode(id: TnodeID) = new NodeFinderInjector(id, stateAgt).judge() //ChordState.findNode(stateAgt, id)
 
   /**
    * Successorを[[momijikawa.p2pscalaproto.IdAddressMessage]]でラップして返します。
@@ -97,9 +97,9 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
   def stabilize() = spawn {
     log.debug("Stabilizing stimulated")
     //val strategy = new successorStabilizationFactory(context, context.system.log).autoGenerate(stateAgt())
-    stateAgt send new NewStabilizer(context, context.system.log).stabilize
+    Await.result(stateAgt alter new NewStabilizer(context, context.system.log).stabilize, 5 seconds)
     //log.debug("Strategy done: " + strategy.toString())
-    stateAgt send fingerStabilizer.stabilize
+    fingerStabilizer.stabilize() // スタビライザが書き換える
     log.debug("fingertable stabilized")
   }
 

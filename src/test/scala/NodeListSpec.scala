@@ -1,5 +1,6 @@
 package momijikawa.p2pscalaproto.test
 
+import momijikawa.p2pscalaproto.nodeID
 import org.specs2.mutable._
 import momijikawa.p2pscalaproto._
 
@@ -58,19 +59,19 @@ class NodeListSpec extends Specification {
   "nearestSuccessor" should {
 
     "自分が含まれるリスト中では自分を返せる" in {
-      nodelist.nearestSuccessor(nodelist.nodes.list(0)).getNodeID.toBigInt must_== nodelist.nodes.list(0).getNodeID.toBigInt
+      nodelist.nearestSuccessor(nodelist.nodes.list(0)).asNodeID.toBigInt must_== nodelist.nodes.list(0).asNodeID.toBigInt
     }
 
     "0のNearestSuccessorは1" in {
-      nodelist.remove(0).nearestSuccessor(nodelist.nodes.list(0)).getNodeID.toBigInt must_== nodelist.nodes.list(1).getNodeID.toBigInt
+      nodelist.remove(0).nearestSuccessor(nodelist.nodes.list(0)).asNodeID.toBigInt must_== nodelist.nodes.list(1).asNodeID.toBigInt
     }
 
     "3のNearestSuccessorは4" in {
-      nodelist.remove(3).nearestSuccessor(nodelist.nodes.list(3)).getNodeID.toBigInt must_== nodelist.nodes.list(4).getNodeID.toBigInt
+      nodelist.remove(3).nearestSuccessor(nodelist.nodes.list(3)).asNodeID.toBigInt must_== nodelist.nodes.list(4).asNodeID.toBigInt
     }
 
     "6のNearestSuccessorは0" in {
-      nodelist.remove(6).nearestSuccessor(nodelist.nodes.list(6)).getNodeID.toBigInt must_== nodelist.nodes.list(0).getNodeID.toBigInt
+      nodelist.remove(6).nearestSuccessor(nodelist.nodes.list(6)).asNodeID.toBigInt must_== nodelist.nodes.list(0).asNodeID.toBigInt
     }
 
   }
@@ -93,6 +94,26 @@ class NodeListSpec extends Specification {
   "NodeList constructor" should {
     "空のリストを渡すとエラーを吐く" in {
       NodeList(List()) must throwA[Exception](message = "list should not be empty.")
+    }
+  }
+
+  "closestPreceedingNode" should {
+    "期待通りのノードを返す: 担当するノードの直前のノードを選ぶ" in {
+      val nodes: List[idAddress] = (0 to 100 by 2) map {
+        BigInt(_)
+      } map {
+        _.toByteArray
+      } map {
+        idAddress(_, dummyActor)
+      } toList
+
+      val nodelist: NodeList = NodeList(nodes)
+
+      for (n <- 1 to 99 by 2) {
+        nodelist.closestPrecedingNode(new nodeID(BigInt(n).toByteArray))(idAddress(BigInt(n - 2).toByteArray, dummyActor)).asNodeID.toBigInt must_== BigInt(n - 1)
+      }
+
+      nodelist.closestPrecedingNode(new nodeID(BigInt(0).toByteArray))(idAddress(BigInt(99).toByteArray, dummyActor)).asNodeID.toBigInt must_== BigInt(100)
     }
   }
 }
