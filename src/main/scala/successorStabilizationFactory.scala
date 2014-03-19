@@ -67,7 +67,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
   def isSuccDead(state: ChordState): Boolean = {
     try {
       state.succList.nearestSuccessor(id_self = state.selfID.get) match {
-        case nrst if nrst.getNodeID == state.selfID.get.getNodeID => false // 自分と同じIDの場合は死んでいない
+        case nrst if nrst.asNodeID == state.selfID.get.asNodeID => false // 自分と同じIDの場合は死んでいない
         case nrst => !availabilityOf(nrst)
       }
     } catch {
@@ -89,7 +89,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
         case succ =>
           predecessorOf(succ) match {
             case None => true
-            case Some(preNext) if preNext.getNodeID == state.selfID.get.getNodeID => false
+            case Some(preNext) if preNext.asNodeID == state.selfID.get.asNodeID => false
             case Some(preNext) => !availabilityOf(preNext)
           }
       }
@@ -108,7 +108,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
     state.pred match {
       case Some(v) =>
         v match {
-          case ida if ida.getNodeID == state.selfID.get.getNodeID => true
+          case ida if ida.asNodeID == state.selfID.get.asNodeID => true
           case ida => availabilityOf(ida)
         }
       case None => false
@@ -126,7 +126,7 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
       case lis =>
         val Succ: idAddress = NodeList(lis).nearestSuccessor(id_self = state.selfID.get)
         // TODO: nearest == selfのとき？ (fixed)
-        state.selfID.get.getNodeID == Succ.getNodeID match {
+        state.selfID.get.asNodeID == Succ.asNodeID match {
           case true => false // 自分が孤独状態ならすぐに譲る
           case false =>
             predecessorOf(Succ) match {
@@ -150,8 +150,8 @@ class successorStabilizationFactory(watcher: Watchable, logger: LoggerLike) {
             sys.error("到達しないはず")
             false // 到達しないはず
           case Some(pSucc) =>
-            logger.info(s"checkConsistentness: (SELF: ${state.selfID.get.getNodeID}, SUCC: ${ida.getNodeID}, PSUCC: ${pSucc.getNodeID}})")
-            state.selfID.get.getNodeID == pSucc.getNodeID
+            logger.info(s"checkConsistentness: (SELF: ${state.selfID.get.asNodeID}, SUCC: ${ida.asNodeID}, PSUCC: ${pSucc.asNodeID}})")
+            state.selfID.get.asNodeID == pSucc.asNodeID
         }
       case None => true // SuccListには自分しかいないとき
     }

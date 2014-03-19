@@ -113,7 +113,7 @@ object ChordState {
    */
   def findNode(csa: Agent[ChordState], id_query: TnodeID)(implicit context: ActorContext) = atomic {
     implicit txn =>
-      val isMeAndQueryEqual = csa().selfID.get.getNodeID == id_query
+      val isMeAndQueryEqual = csa().selfID.get.asNodeID == id_query
       val id_nearest: idAddress = NodeList(csa().succList.nodes.list ++ csa().fingerList.nodes.list).nearestSuccessor(id_self = csa().selfID.get)
 
       isMeAndQueryEqual match {
@@ -126,7 +126,7 @@ object ChordState {
           isQueryBelongsNearest match {
             case true =>
               val cliNrst = id_nearest.getTransmitter
-              val address: Option[idAddress] = (id_nearest.getNodeID == csa().selfID.get.getNodeID) match {
+              val address: Option[idAddress] = (id_nearest.asNodeID == csa().selfID.get.asNodeID) match {
                 case true => csa().selfID
                 case false => cliNrst.whoAreYou
               }
@@ -134,7 +134,7 @@ object ChordState {
 
             case false =>
               val id_nearestForwarder: idAddress = NodeList(csa().succList.nodes.list ++ csa().fingerList.nodes.list).nearestSuccessor(id_query)
-              (id_nearestForwarder.getNodeID == csa().selfID.get) match {
+              (id_nearestForwarder.asNodeID == csa().selfID.get) match {
                 case true => context.sender ! IdAddressMessage(idaddress = csa().selfID)
                 case false => id_nearestForwarder.actorref.forward(FindNode(id_query.getBase64))
               }
@@ -181,7 +181,7 @@ object ChordState {
         context.system.log.info("ChordState: checking my predecessor")
 
         // when pred is self?
-        val isSenderSelf = st.selfID.get.getNodeID == sender.getNodeID
+        val isSenderSelf = st.selfID.get.asNodeID == sender.asNodeID
 
         isSenderSelf match {
           case true => false // 必要無し
@@ -192,7 +192,7 @@ object ChordState {
                 {
                   sender.belongs_between(pred).and(st.selfID.get) ||
                     pred == st.selfID.get ||
-                    st.succList.nearestSuccessor(st.selfID.get).getNodeID == st.selfID.get.getNodeID
+                    st.succList.nearestSuccessor(st.selfID.get).asNodeID == st.selfID.get.asNodeID
                 }
             }) | false // pred = Noneの場合も考慮
             val isPredDead = !new successorStabilizationFactory(context, context.system.log).isPredLiving(st) // 副作用あり

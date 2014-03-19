@@ -40,7 +40,7 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
   }
 
   /** 新たにノードIDのみで焼き直す */
-  def getNodeID: nodeID = nodeID(id)
+  def asNodeID: nodeID = nodeID(id)
 }
 
 object idAddress {
@@ -193,6 +193,16 @@ object TnodeID {
     val arr = Array.fill[Byte](20)(0)
     Random.nextBytes(arr)
     new nodeID(arr)
+  }
+
+  // index of array(0 to size - 1)
+  val fingerIdx2NodeID: Int => nodeID => nodeID = (arrayIndex: Int) => {
+    require(arrayIndex >= 0 && arrayIndex <= 159)
+    val index = arrayIndex + 1
+
+    { selfID: nodeID =>
+      new nodeID((BigInt(1, selfID.bytes) + BigInt(2).pow(index - 1)).mod(BigInt(2).pow(160)).toByteArray)
+    }
   }
 
 }

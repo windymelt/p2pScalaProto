@@ -76,4 +76,21 @@ class TnodeIDSpec extends Specification {
       id_1000 <----- id_1000 must_== BigInt(0)
     }
   }
+
+  "fingerIdx2nodeID" should {
+    "範囲外引数でエラー" in {
+      TnodeID.fingerIdx2NodeID(-1)(new nodeID(BigInt(0).toByteArray)) must throwA[IllegalArgumentException]
+      TnodeID.fingerIdx2NodeID(160)(new nodeID(BigInt(0).toByteArray)) must throwA[IllegalArgumentException]
+    }
+
+    "公式に合う答えを返す" in {
+      import scala.util.Random
+      val rnd = new Random()
+      for (k <- 0 to 159) {
+        val self = new nodeID(BigInt(2).pow(rnd.nextInt(159)) toByteArray)
+        val node = TnodeID.fingerIdx2NodeID(k)(self)
+        BigInt(1, node.bytes) must_== ((BigInt(self.bytes) + BigInt(2).pow(k + 1 - 1)) mod BigInt(2).pow(160))
+      }
+    }
+  }
 }

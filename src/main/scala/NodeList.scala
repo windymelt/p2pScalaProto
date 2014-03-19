@@ -3,6 +3,9 @@ package momijikawa.p2pscalaproto
 import akka.actor.ActorRef
 
 case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
+  def closestPrecedingNode(objective: TnodeID)(self: idAddress): idAddress = {
+    nodes.list.reverse.find(p => p belongs_between self and objective).getOrElse(self)
+  }
   /**
    * 所与のノードIDに最も近いものを返します。
    * @param id_query 検索の対象となるノードID。
@@ -17,7 +20,7 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
   }
 
   def nearestNeighborWithoutSelf(id_query: TnodeID, id_self: TnodeID): Option[idAddress] = {
-    nodes.list.filterNot(_.getNodeID == nodeID(id_self.getArray())) match {
+    nodes.list.filterNot(_.asNodeID == nodeID(id_self.getArray())) match {
       case lis: List[idAddress] if lis.isEmpty => None
       case lis: List[idAddress] =>
         Some(lis.filter(id_query.belongs_between(id_self).and(_))
@@ -38,7 +41,7 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
     nodes.list.minBy(ida => TnodeID.leftArrowDistance(to = id_self, from = ida))
 
   def nearestSuccessorWithoutSelf(id_self: TnodeID): Option[idAddress] =
-    nodes.list.filterNot(_.getNodeID == nodeID(id_self.getArray())) match {
+    nodes.list.filterNot(_.asNodeID == nodeID(id_self.getArray())) match {
       case lis: List[idAddress] if lis.isEmpty => None
       case lis: List[idAddress] =>
         Some(lis.minBy(ida => TnodeID.leftArrowDistance(to = id_self, from = ida)))
@@ -54,6 +57,12 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
   def remove(a: ActorRef): NodeList = NodeList(nodes.list.filterNot((i) => i.a == a))
 
   def replace(from: ActorRef, to: idAddress) = NodeList(nodes.list.map(p => if (p.a == from) to else p))
+
+  def patch(index: Int, replacement: idAddress) = {
+    NodeList(nodes.list.patch(index, List(replacement), 1))
+  }
+
+  def apply(n: Int): idAddress = nodes.list(n)
 
   /**
    * 所与のノードIDに最も近いノードを削除した[[momijikawa.p2pscalaproto.NodeList]]を返します。
