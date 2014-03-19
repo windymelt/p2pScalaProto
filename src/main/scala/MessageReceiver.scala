@@ -91,6 +91,10 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
     log.debug("MessageReceiver has been newed")
   }
 
+  /**
+   * 何らかの理由でこのアクターが再起動した場合に呼ばれます。
+   * @param reason 再起動した理由。
+   */
   override def postRestart(reason: Throwable) = {
     log.debug(s"Restart reason: ${reason.getLocalizedMessage}")
     preStart()

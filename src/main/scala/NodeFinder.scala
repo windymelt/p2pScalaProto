@@ -1,5 +1,15 @@
 package momijikawa.p2pscalaproto
 
+/**
+ * ノードの検索を担うクラス。
+ * @param objective 検索目標のノードID。
+ * @param self このノードのID。
+ * @param successor SuccessorのノードID。
+ * @param myTerritory このノードが担当だった場合の処理。
+ * @param onHandling Successorが担当である場合の処理。
+ * @param onForwarding 処理を転送する場合の処理。
+ * @tparam A 処理の返り値の型。
+ */
 class NodeFinder[A](objective: TnodeID, self: TnodeID, successor: TnodeID, myTerritory: () => A, onHandling: () => A, onForwarding: () => A) {
   def judge: A = {
     val isNodeAlone = successor == self
@@ -12,6 +22,12 @@ class NodeFinder[A](objective: TnodeID, self: TnodeID, successor: TnodeID, myTer
 import akka.agent.Agent
 import akka.actor.ActorContext
 
+/**
+ * 実際にChordが利用するノード検索の実装。
+ * @param objective 検索目標のノードID。
+ * @param state このノードの状態の[[akka.agent.Agent]]。
+ * @param context 送信者の特定に必要な情報。
+ */
 class NodeFinderInjector(objective: TnodeID, state: Agent[ChordState])(implicit val context: ActorContext) {
 
   private def reply(message: IdAddressMessage) = context.sender ! message

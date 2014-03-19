@@ -103,6 +103,10 @@ class ChordController(stateAgt: Agent[ChordState], implicit val context: ActorCo
     log.debug("fingertable stabilized")
   }
 
+  /**
+   * 所与のアクターをSuccessorTable/FingerTableから除名します。
+   * @param a 除名の対象となるアクター。
+   */
   def unregistNode(a: ActorRef) = {
     log.debug(s"unregisting node $a")
     stateAgt send {
