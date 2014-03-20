@@ -34,9 +34,7 @@ class Transmitter(remote: ActorRef) {
 
   def findNode(id_query: TnodeID): Future[IdAddressMessage] = {
     allCatch opt {
-      println("finding node.")
       val result = RemoteActor.ask(FindNode(id_query.getBase64)).mapTo[IdAddressMessage]
-      println("IdAddressMessage received")
       result
     } getOrElse (Future.successful(IdAddressMessage(None)))
   }

@@ -11,7 +11,16 @@ import scalaz._
 import Scalaz._
 import scalaz.Ordering.GT
 
+/**
+ * 新型の安定化クラスです。動作が改良されています。
+ * Chordの安定化アルゴリズムに従ってSuccessorのリストを更新し、[[momijikawa.p2pscalaproto.ChordState]]を返すためのクラスです。
+ * @param watcher ノードのアクターをWatch/Unwatchできるクラス
+ * @param logger ログを取るクラス
+ */
 class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
+  /**
+   * 安定化処理の本体。
+   */
   val stabilize: ChordState => ChordState = (state: ChordState) => {
 
     require(state.selfID.isDefined)
@@ -50,16 +59,35 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
     }
   }
 
-  private def notify_to(self: idAddress)(node: idAddress) = {
+  /**
+   * 自分が正当なPredecessorであることをSuccessorのノードに通告します。
+   * @param self このノードの情報。
+   * @param node 通告先のノード。
+   */
+  private def notify_to(self: idAddress)(node: idAddress): Unit = {
     node.getTransmitter.amIPredecessor(self)
   }
 
+  /**
+   * 所定のノードのpredecessorを取得します。ブロッキング処理です。
+   * @param node 取得先ノード。
+   * @return nodeのpredecessorがOptionで返ります。
+   */
   private def predecessor_of(node: idAddress): Option[idAddress] = {
     Await.result(node.getTransmitter.yourPredecessor, 20 seconds).idaddress
   }
 
+  /**
+   * Chordネットワークに接続します。
+   * @param state このノードの状態。
+   * @param ida 接続先の踏み台ノード。
+   * @return 新たなSuccessorが[[scala.Option]]で返ります。
+   */
   private def joinNetwork(state: ChordState, ida: idAddress): (ChordState, Option[idAddress]) = ChordState.joinNetworkS(ida).run(state)
 
+  /**
+   * Predecessorにjoinします。何らかの事情でSuccessorが利用できない場合に呼ばれます。
+   */
   private val joinPred: (ChordState) => ChordState =
     (state: ChordState) => {
       // TODO: 簡潔にリファクタする
@@ -77,11 +105,21 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
       }
     }
 
+  /**
+   * ノードを停止させます。SuccessorもPredecessorも使えない場合に呼ばれます。ノードは起動直後と似た状態になります。
+   * @param state このノードの状態。
+   * @return 更新されたノードの状態。
+   */
   private def bunkruptNode(state: ChordState): ChordState = {
     state.stabilizer.stop()
     state.copy(succList = NodeList(List[idAddress](state.selfID.get)), pred = None)
   }
 
+  /**
+   * このノードに最も近いSuccessorをリストから除外します。Successorが死んでいる場合などに呼ばれます。
+   * @param state このノードの状態。
+   * @return 更新されたノードの状態。
+   */
   private def recoverSuccList(state: ChordState): ChordState = {
     logger.info("recovering successor list; disconnecting successor...")
     watcher.unwatch(state.succList.nearestSuccessor(state.selfID.get).actorref)
@@ -89,6 +127,9 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
     joinNetwork(newState, newState.succList.nearestSuccessor(newState.selfID.get))._1 // TODO: predも使用できる
   }
 
+  /**
+   * Successorのリストを多重化します。
+   */
   private val increaseSuccessor: ChordState => ChordState = (state: ChordState) => {
     logger.debug("going to add successor")
 
@@ -110,6 +151,9 @@ class NewStabilizer(watcher: Watchable, logger: LoggerLike) {
     }
   }
 
+  /**
+   * このノードから移動すべきデータがある場合にそのデータを正しいノードに移動させます。
+   */
   private val immigrateData: ChordState => ChordState = (state: ChordState) => {
 
     def listUpToMove(cs: ChordState): Map[Seq[Byte], KVSData] = {

@@ -2,7 +2,18 @@ package momijikawa.p2pscalaproto
 
 import akka.actor.ActorRef
 
+/**
+ * SuccessorTableやFingerTableに使われるノードのリストです。
+ * 両者に共通の機能を実装しています。
+ * @param nodes 初期ノード。
+ */
 case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
+  /**
+   * 所与のノードにもっとも後ろから接近しているノードを返します。
+   * @param objective 対象のノード。
+   * @param self このノード。
+   * @return 最接近しているノード。
+   */
   def closestPrecedingNode(objective: TnodeID)(self: idAddress): idAddress = {
     nodes.list.reverse.find(p => p belongs_between self and objective).getOrElse(self)
   }
@@ -31,7 +42,6 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
     }
   }
 
-  // TODO: 自分自身はどうするのか
   /**
    * 所与のノードIDにSuccessorとして最も近いノードを返します。
    * @param id_self 検索の対象となるノードID。
@@ -56,12 +66,29 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
 
   def remove(a: ActorRef): NodeList = NodeList(nodes.list.filterNot((i) => i.a == a))
 
+  /**
+   * 所与のアクターを持つ[[momijikawa.p2pscalaproto.idAddress]]を書き換えます。
+   * @param from 書き換え対象となる[[momijikawa.p2pscalaproto.idAddress]]が持つべきアクター。
+   * @param to 更新に利用する[[momijikawa.p2pscalaproto.idAddress]]。
+   * @return 書き換え済の[[momijikawa.p2pscalaproto.NodeList]]。
+   */
   def replace(from: ActorRef, to: idAddress) = NodeList(nodes.list.map(p => if (p.a == from) to else p))
 
+  /**
+   * 所与のインデックスにあるノードを他のノードと差し替えます。
+   * @param index 差し替え対象となるインデックス。
+   * @param replacement 差し替えるノード。
+   * @return 差し替え済の[[momijikawa.p2pscalaproto.NodeList]]。
+   */
   def patch(index: Int, replacement: idAddress) = {
     NodeList(nodes.list.patch(index, List(replacement), 1))
   }
 
+  /**
+   * 所与のインデックスに該当するノードを返します。
+   * @param n インデックス。
+   * @return 該当するノード。
+   */
   def apply(n: Int): idAddress = nodes.list(n)
 
   /**

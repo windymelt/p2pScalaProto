@@ -4,6 +4,15 @@ import scala.concurrent.duration.FiniteDuration
 import scalaz._
 import Scalaz._
 
+/**
+ * UPnPでポートを解放するクラス。
+ * @param external_port インターネット側のポート。
+ * @param local_port LAN側のポート。
+ * @param protocol プロトコル。
+ * @param description サービスの説明。
+ * @param limit フォワードする時間。
+ * @param log ログ。
+ */
 class UPnPOpener(val external_port: Int, val local_port: Int, val protocol: String, val description: String, val limit: FiniteDuration)(val log: akka.event.LoggingAdapter) {
 
   import com.psyonik.upnp._
