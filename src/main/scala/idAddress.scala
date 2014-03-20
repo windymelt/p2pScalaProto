@@ -50,7 +50,7 @@ object idAddress {
     import scala.concurrent.Await
     import scala.util.matching.Regex
 
-    val Matcher = new Regex("""([a-zA-Z0-9=\\\+]+)@(.+):(\d+)""", "id", "host", "name")
+    val Matcher = new Regex("""([a-zA-Z0-9=\/\+]+)@(.+):(\d+)""", "id", "host", "name")
 
     str match {
       case Matcher(id, host, port) =>
