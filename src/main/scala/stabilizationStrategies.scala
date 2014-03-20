@@ -16,6 +16,7 @@ import LoggerLikeObject._
 import WatchableObject._
 
 /**
+ * @deprecated
  * ノードの安定化に用いるパターンのトレイト。
  */
 trait stabilizationStrategy {

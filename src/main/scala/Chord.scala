@@ -6,6 +6,9 @@ import com.typesafe.config.ConfigFactory
 import akka.agent.Agent
 import scala.collection.immutable.HashMap
 
+/**
+ * メインクラスです。Chordアルゴリズムを利用してDHTを実装します。
+ */
 class Chord {
 
   import scala.concurrent.Future
@@ -104,7 +107,7 @@ class Chord {
   }
 
   /**
-   * [[momijikawa.p2pscalaproto.Chord.join( S t r i n g )]]で必要となるレファレンス文字列を返します。
+   * [[momijikawa.p2pscalaproto.Chord.join(String)]]で必要となるレファレンス文字列を返します。
    * @return レファレンス文字列。
    */
   def getReference = Serialize.!?[Option[String]](receiver)
