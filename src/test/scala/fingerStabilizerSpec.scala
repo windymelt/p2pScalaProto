@@ -1,6 +1,5 @@
 package momijikawa.p2pscalaproto.test
 
-import momijikawa.p2pscalaproto.IdAddressMessage
 import momijikawa.p2pscalaproto.nodeID
 import org.specs2.mutable._
 import org.specs2.mock._
@@ -17,6 +16,8 @@ import org.specs2.ScalaCheck
 import org.scalacheck._
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+import momijikawa.p2pscalaproto.networking.NodeWatcher
+import momijikawa.p2pscalaproto.messages.NodeIdentifierMessage
 
 class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
   sequential
@@ -25,14 +26,14 @@ class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
 
   val dummyActor = actor("dummy")(new Act {
     become {
-      case anything => // do nothing
+      case anything ⇒ // do nothing
     }
   })
 
   "stabilizeOn" should {
     "findNodeに成功した場合正常に動作する" in {
       forAll(Gen.choose(0, 159)) {
-        (testingIndex: Int) =>
+        (testingIndex: Int) ⇒
           //(testingIndex >= 0 && testingIndex < 160) ==>
           {
             println(s"Testing for $testingIndex")
@@ -47,27 +48,27 @@ class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
             ))
             val agent = Agent(csMock)(system.dispatcher)
             val watcherMock = mock[NodeWatcher]
-            watcherMock.watch(any) answers { _ => }
-            watcherMock.unwatch(any) answers { _ => }
+            watcherMock.watch(any) answers { _ ⇒ }
+            watcherMock.unwatch(any) answers { _ ⇒ }
 
             class finsta2(w: NodeWatcher, a: Agent[ChordState]) extends FingerStabilizer(w, a) {
-              override def fetchNode(idx: Int) = Future.successful(Some(idAddress(TnodeID.fingerIdx2NodeID(testingIndex)(self.asNodeID).bytes, dummyActor)))
+              override def fetchNode(idx: Int) = Future.successful(Some(idAddress(TnodeID.fingerIdx2NodeID(testingIndex)(self.id), dummyActor)))
             }
 
             val stabilizer = new finsta2(watcherMock, agent)
 
             stabilizer.stabilizeOn(testingIndex)
             Thread.sleep(100) // waiting for apply to agent
-            agent.get().fingerList.nodes.list(testingIndex).asNodeID.toBigInt must_== TnodeID.fingerIdx2NodeID(testingIndex)(self.asNodeID).toBigInt
+            agent.get().fingerList.nodes.list(testingIndex).id.toBigInt must_== TnodeID.fingerIdx2NodeID(testingIndex)(self.id).toBigInt
           }
       }
     }
 
     "findNodeに失敗したときは変更しない" in {
       forAll(Gen.choose(0, 159)) {
-        (testingIndex: Int) =>
+        (testingIndex: Int) ⇒
           {
-            val self = idAddress(BigInt(0).toByteArray, dummyActor)
+            val self = idAddress(nodeID(BigInt(0).toByteArray), dummyActor)
             val csMock = spy(ChordState(
               selfID = Some(self),
               succList = NodeList(List(self)),
@@ -78,8 +79,8 @@ class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
             ))
             val agent = Agent(csMock)(system.dispatcher)
             val watcherMock = mock[NodeWatcher]
-            watcherMock.watch(any) answers { _ => }
-            watcherMock.unwatch(any) answers { _ => }
+            watcherMock.watch(any) answers { _ ⇒ }
+            watcherMock.unwatch(any) answers { _ ⇒ }
 
             class finsta2(w: NodeWatcher, a: Agent[ChordState]) extends FingerStabilizer(w, a) {
               override def fetchNode(idx: Int) = Future.failed(new TimeoutException("meow meow meow"))
@@ -96,9 +97,9 @@ class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
 
     "findNodeに失敗したときは変更しない(None case)" in {
       forAll(Gen.choose(0, 159)) {
-        (testingIndex: Int) =>
+        (testingIndex: Int) ⇒
           {
-            val self = idAddress(BigInt(0).toByteArray, dummyActor)
+            val self = idAddress(nodeID(BigInt(0).toByteArray), dummyActor)
             val csMock = spy(ChordState(
               selfID = Some(self),
               succList = NodeList(List(self)),
@@ -109,8 +110,8 @@ class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
             ))
             val agent = Agent(csMock)(system.dispatcher)
             val watcherMock = mock[NodeWatcher]
-            watcherMock.watch(any) answers { _ => }
-            watcherMock.unwatch(any) answers { _ => }
+            watcherMock.watch(any) answers { _ ⇒ }
+            watcherMock.unwatch(any) answers { _ ⇒ }
 
             class finsta2(w: NodeWatcher, a: Agent[ChordState]) extends FingerStabilizer(w, a) {
               override def fetchNode(idx: Int) = Future.successful(None)

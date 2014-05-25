@@ -1,9 +1,10 @@
-package momijikawa.p2pscalaproto
+package momijikawa.p2pscalaproto.stabilizer
 
 import akka.actor._
 import akka.pattern._
 import scala.concurrent.Await
 import scala.concurrent.duration._
+import momijikawa.p2pscalaproto.messages._
 
 /**
  * 安定化の開始と停止を担当するクラス。

@@ -19,15 +19,15 @@ class ChordStateSpec extends Specification with BeforeExample with NoTimeConvers
 
   val dummyActor = actor("dummy")(new Act {
     become {
-      case anything => // do nothing
+      case anything ⇒ // do nothing
     }
   })
 
   val state = Agent(
     new ChordState(
       None,
-      NodeList(List(idAddress(Array.fill(20)(0.toByte), dummyActor))),
-      NodeList(List.fill(10)(idAddress(Array.fill(20)(0.toByte), dummyActor))),
+      NodeList(List(idAddress(nodeID(Seq.fill(20)(0.toByte)), dummyActor))),
+      NodeList(List.fill(10)(idAddress(nodeID(Seq.fill(20)(0.toByte)), dummyActor))),
       None,
       new HashMap[Seq[Byte], KVSData](),
       null
@@ -38,8 +38,8 @@ class ChordStateSpec extends Specification with BeforeExample with NoTimeConvers
     state send {
       new ChordState(
         None,
-        NodeList(List(idAddress(Array.fill(20)(0.toByte), dummyActor))),
-        NodeList(List(idAddress(Array.fill(20)(0.toByte), dummyActor))),
+        NodeList(List(idAddress(nodeID(Seq.fill(20)(0.toByte)), dummyActor))),
+        NodeList(List(idAddress(nodeID(Seq.fill(20)(0.toByte)), dummyActor))),
         None,
         new HashMap[Seq[Byte], KVSData](),
         null)

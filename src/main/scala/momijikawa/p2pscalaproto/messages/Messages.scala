@@ -1,4 +1,4 @@
-package momijikawa.p2pscalaproto
+package momijikawa.p2pscalaproto.messages
 
 import akka.actor._
 import akka.pattern.ask
@@ -6,6 +6,7 @@ import scala.reflect.ClassTag
 import akka.util.Timeout
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
+import momijikawa.p2pscalaproto._
 
 /**
  * すべてのメッセージの継承元。
@@ -53,7 +54,7 @@ case object YourSuccessor extends nodeMessage
  * ノードがPredecessorであることを通知して相手のPredecessor情報を修正してもらう際に用いるメッセージ。
  * @param id Predecessorであるはずのノードの情報。
  */
-case class AmIPredecessor(id: idAddress) extends nodeMessage
+case class AmIPredecessor(id: NodeIdentifier) extends nodeMessage
 
 /**
  * ノードからデータを取得する際に用いるメッセージ。
@@ -69,10 +70,10 @@ case class GetChunk(id: Seq[Byte]) extends nodeMessage
 case class SetChunk(id: Seq[Byte], kvp: KVSData) extends nodeMessage
 
 /**
- * [[momijikawa.p2pscalaproto.idAddress]]を返す際に用いるカプセル。
- * @param idaddress
+ * [[momijikawa.p2pscalaproto.NodeIdentifier]]を返す際に用いるカプセル。
+ * @param identifier
  */
-case class IdAddressMessage(idaddress: Option[idAddress]) extends nodeMessage
+case class NodeIdentifierMessage(identifier: Option[NodeIdentifier]) extends nodeMessage
 
 /**
  * pingの返答として用いるメッセージ。
@@ -135,18 +136,24 @@ case class InitNode(id: nodeID) extends chordMessage
  * @param value データ。
  */
 case class PutData(title: String, value: Stream[Byte]) extends chordMessage
+sealed trait PutDataResult extends chordMessage
+case class PutDataSuccessful(key: Seq[Byte]) extends PutDataResult
+case class PutDataFailed(reason: String) extends PutDataResult
 
 /**
  * DHTからのデータ取得を指示するメッセージ。
  * @param key キー。
  */
 case class GetData(key: Seq[Byte]) extends chordMessage
+sealed trait GetDataResult extends chordMessage
+case class GetDataSuccessful(key: Seq[Byte], value: Seq[Byte]) extends GetDataResult
+case class GetDataFailed(reason: String) extends GetDataResult
 
 /**
  * DHTネットワークへの参加を指示するメッセージ。
  * @param connectTo 最初に接続するブートストラップノード。
  */
-case class JoinNode(connectTo: idAddress) extends chordMessage
+case class JoinNode(connectTo: NodeIdentifier) extends chordMessage
 
 /**
  * ノードの状態を請求するメッセージ。

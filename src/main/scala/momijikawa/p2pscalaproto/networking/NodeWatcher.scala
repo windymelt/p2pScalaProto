@@ -1,4 +1,4 @@
-package momijikawa.p2pscalaproto
+package momijikawa.p2pscalaproto.networking
 
 import akka.actor._
 

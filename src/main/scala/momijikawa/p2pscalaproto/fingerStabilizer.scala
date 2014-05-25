@@ -5,6 +5,7 @@ import akka.agent.Agent
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
+import momijikawa.p2pscalaproto.networking.NodeWatcher
 
 /**
  * FingerTableの安定化を行います。
@@ -20,9 +21,9 @@ class FingerStabilizer(watcher: NodeWatcher, agent: Agent[ChordState]) {
     // 1 to size-1 (except for 0: 2^0)
     require(indexToUpdate >= 0 && indexToUpdate < agent().fingerList.nodes.size)
     unwatch(agent().fingerList(indexToUpdate))
-    val newIdAddressFuture: Future[Option[idAddress]] = fetchNode(indexToUpdate)
+    val newIdAddressFuture: Future[Option[NodeIdentifier]] = fetchNode(indexToUpdate)
     newIdAddressFuture map {
-      newNode =>
+      newNode ⇒
         newNode foreach watch
         val newList = fixList(indexToUpdate, newNode, agent().fingerList)
         val newStatus = recreateState(newList)
@@ -54,9 +55,9 @@ class FingerStabilizer(watcher: NodeWatcher, agent: Agent[ChordState]) {
    * @param idx FingerTableのインデックス。
    * @return 最もインデックスに該当するFingerTableの要素としてふさわしいノード。
    */
-  def fetchNode(idx: Int): Future[Option[idAddress]] = {
-    val indexAsNodeID = TnodeID.fingerIdx2NodeID(idx)(agent().selfID.get.asNodeID)
-    agent().selfID.get.getTransmitter.findNode(indexAsNodeID) map { idam => idam.idaddress }
+  def fetchNode(idx: Int): Future[Option[NodeIdentifier]] = {
+    val indexAsNodeID = TnodeID.fingerIdx2NodeID(idx)(agent().selfID.get.id)
+    agent().selfID.get.getTransmitter.findNode(indexAsNodeID) map { idam ⇒ idam.identifier }
   }
 
   /**
@@ -66,10 +67,10 @@ class FingerStabilizer(watcher: NodeWatcher, agent: Agent[ChordState]) {
    * @param fingerList 更新されるFingerTable。
    * @return 更新されたFingerTable。
    */
-  private def fixList(index: Int, node: Option[idAddress], fingerList: NodeList): NodeList = {
+  private def fixList(index: Int, node: Option[NodeIdentifier], fingerList: NodeList): NodeList = {
     node match {
-      case Some(exactNode) => fingerList.patch(index, exactNode)
-      case None => fingerList
+      case Some(exactNode) ⇒ fingerList.patch(index, exactNode)
+      case None            ⇒ fingerList
     }
   }
 
@@ -84,11 +85,11 @@ class FingerStabilizer(watcher: NodeWatcher, agent: Agent[ChordState]) {
    * ノードを監視します。監視しておくとノードが死んだ場合に自動的に登録が解除されます。
    * @param node 監視対象のノード。
    */
-  private def watch(node: idAddress): Unit = watcher.watch(node.a)
+  private def watch(node: NodeIdentifier): Unit = {} //watcher.watch(node.a)
 
   /**
    * ノードの監視を解除します。
    * @param node 監視を解除したいノード。
    */
-  private def unwatch(node: idAddress): Unit = watcher.unwatch(node.a)
+  private def unwatch(node: NodeIdentifier): Unit = {} //watcher.unwatch(node.a)
 }

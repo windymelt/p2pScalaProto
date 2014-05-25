@@ -1,4 +1,4 @@
-package momijikawa.p2pscalaproto
+package momijikawa.p2pscalaproto.networking
 
 import scala.concurrent.duration.FiniteDuration
 import scalaz._
@@ -19,16 +19,16 @@ class UPnPOpener(val external_port: Int, val local_port: Int, val protocol: Stri
 
   def open = {
     GatewayDiscover().getValidGateway() >>= {
-      gw =>
+      gw ⇒
         log.debug("UPnP: found Gateway")
         val lcl_addr = gw.localAddress
         val ext_addr = gw.externalIPAddress
 
         gw.getSpecificPortMappingEntry(external_port, protocol) match {
-          case Some(_) =>
+          case Some(_) ⇒
             log.warning("UPnP: port mapping already exists")
             None
-          case None =>
+          case None ⇒
             log.debug("requesting port mapping...")
             gw.addPortMapping(external_port, local_port, lcl_addr.getHostAddress, protocol, description, limit.toSeconds.toInt).some
         }
@@ -37,18 +37,18 @@ class UPnPOpener(val external_port: Int, val local_port: Int, val protocol: Stri
 
   def close = {
     GatewayDiscover().getValidGateway() >>= {
-      gw =>
+      gw ⇒
         gw.getSpecificPortMappingEntry(external_port, protocol) match {
-          case Some(_) =>
+          case Some(_) ⇒
             gw.deletePortMapping(external_port, protocol).some
-          case None => None
+          case None ⇒ None
         }
     }
   } | false
 
   def getExternalAddress = {
     GatewayDiscover().getValidGateway() >>= {
-      gw =>
+      gw ⇒
         gw.externalIPAddress
     }
   }

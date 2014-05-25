@@ -1,31 +1,33 @@
 package momijikawa.p2pscalaproto
 
-import com.sun.org.apache.xml.internal.security.utils.Base64
+import Base64Conversion._
 import akka.actor._
 import scalaz._
 import Scalaz._
 import scala.util.Random
+import momijikawa.p2pscalaproto.networking.NodeMessenger
 
 /**
  * ノードIDと実体のノードである[[akka.actor.ActorRef]]をまとめたクラス。
  * IDと実体への参照の両方が必要な場面で使う。
  * @param id ノードのID。DHT空間での位置。20オクテット。160bit
- * @param a ノードの実体。ある意味で個人情報であるが筒抜け
+ * @param uri ノードの実体。ある意味で個人情報であるが筒抜け
  */
-case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRef with Serializable {
-  override val idVal: Array[Byte] = id
-  override val actorref = a
+case class idAddress(id: nodeID, uri: ActorRef) extends NodeIdentifier with TnodeID with TActorRef with Serializable {
+  type URI = ActorRef
+  override val idVal: Seq[Byte] = id.bytes
+  override val actorref = uri
 
   override def equals(obj: Any) = obj match {
-    case that: idAddress => id.deep == that.id.deep && a == that.a
-    case otherwise => false
+    case that: idAddress ⇒ id == that.id && uri == that.uri
+    case otherwise       ⇒ false
   }
 
   def this(id: TnodeID, a: ActorRef) = {
-    this(id.idVal, a)
+    this(nodeID(id.idVal), a)
   }
 
-  override def toString() = {
+  override def serialize = {
     import akka.serialization._
     import com.typesafe.config.ConfigFactory
 
@@ -39,13 +41,14 @@ case class idAddress(id: Array[Byte], a: ActorRef) extends TnodeID with TActorRe
     nodeID(idVal).getBase64 + "@" + hostname + ":" + port
   }
 
-  /** 新たにノードIDのみで焼き直す */
-  def asNodeID: nodeID = nodeID(id)
+  override def toString() = serialize
 }
 
 object idAddress {
 
-  def fromString(str: String)(implicit system: ActorSystem): Option[idAddress] = {
+  @deprecated def apply(id: Array[Byte], a: ActorRef): idAddress = idAddress.apply(nodeID(id), a)
+
+  def fromString(str: String)(implicit system: ActorSystem): Option[NodeIdentifier] = {
     import scala.concurrent.duration._
     import scala.concurrent.Await
     import scala.util.matching.Regex
@@ -53,10 +56,10 @@ object idAddress {
     val Matcher = new Regex("""([a-zA-Z0-9=\/\+]+)@(.+):(\d+)""", "id", "host", "name")
 
     str match {
-      case Matcher(id, host, port) =>
+      case Matcher(id, host, port) ⇒
         val actorF = system.actorSelection(s"akka.tcp://ChordCore-DHT@$host:$port/user/Receiver2ch").resolveOne(50 seconds) // いまのところp2p2ch専用
-        Some(idAddress(Base64.decode(id), Await.result(actorF, 10 seconds)))
-      case _ => None
+        Some(idAddress(nodeID(id.base64Seq), Await.result(actorF, 10 seconds)))
+      case _ ⇒ None
     }
   }
 
@@ -65,25 +68,26 @@ object idAddress {
 trait TActorRef {
   def actorref: ActorRef
 
-  def getTransmitter: Transmitter = {
-    new Transmitter(actorref)
+  def getMessenger: NodeMessenger = {
+    new NodeMessenger(actorref)
   }
+  def getTransmitter = getMessenger
 }
 
-case class nodeID(bytes: Array[Byte]) extends TnodeID {
+case class nodeID(bytes: Seq[Byte]) extends TnodeID {
   override val idVal = bytes
 
-  def this(str: String) = this(Base64.decode(str))
+  def this(str: String) = this(str.base64Seq)
 
 }
 
 trait TnodeID {
-  def idVal: Array[Byte] = new Array(20)(0.toByte)
+  def idVal: Seq[Byte] = Seq.fill(20)(0.toByte)
 
-  def getArray(): Array[Byte] = idVal.toArray
+  def byteArray: Array[Byte] = idVal.toArray
 
   /** Base64で可視化する。文字ベースのシステムではいろいろと重宝する */
-  def getBase64: String = Base64.encode(idVal.toArray)
+  def getBase64: String = idVal.base64
 
   @Override
   override def hashCode(): Int = idVal.hashCode()
@@ -94,8 +98,8 @@ trait TnodeID {
   @Override
   override def equals(obj: Any) = {
     obj match {
-      case that: TnodeID => this.getBase64.equals(that.getBase64)
-      case _ => false
+      case that: TnodeID ⇒ this.getBase64.equals(that.getBase64)
+      case _             ⇒ false
     }
   }
 
@@ -118,7 +122,7 @@ trait TnodeID {
   def <-----(target: TnodeID): BigInt = TnodeID.leftArrowDistance(this, target)
 
   /** IDを[[scala.math.BigInt]]で返す。 */
-  def toBigInt = BigInt.apply(1, idVal) // absolutely returns plus BigInt
+  def toBigInt = BigInt.apply(1, idVal.toArray) // absolutely returns plus BigInt
 }
 
 object TnodeID {
@@ -132,17 +136,17 @@ object TnodeID {
    */
   @deprecated
   def distance(id1: TnodeID, id2: TnodeID): BigInt = {
-    val x: BigInt = BigInt.apply(1, id1.getArray())
-    val y: BigInt = BigInt.apply(1, id2.getArray())
+    val x: BigInt = BigInt.apply(1, id1.byteArray)
+    val y: BigInt = BigInt.apply(1, id2.byteArray)
     val HALF: BigInt = BigInt.apply(2).pow(159)
     val x_y_subtract: BigInt = (x - y).abs; // abs(x-y)
     x_y_subtract >= HALF match {
-      case true => x_y_subtract - HALF
-      case false => x_y_subtract
+      case true  ⇒ x_y_subtract - HALF
+      case false ⇒ x_y_subtract
     }
   }
 
-  private def bigIntFrom(nid: TnodeID): BigInt = BigInt.apply(nid.getArray())
+  private def bigIntFrom(nid: TnodeID): BigInt = BigInt.apply(nid.byteArray)
 
   /**
    * ノード間の左向きに限った距離を算出します。
@@ -173,14 +177,14 @@ object TnodeID {
     val big_omega: BigInt = omega.toBigInt
 
     big_alpha.compare(big_omega) match {
-      case 0 => true
-      case _ =>
+      case 0 ⇒ true
+      case _ ⇒
         big_omega.compare(big_alpha) match {
-          case x if x < 0 =>
+          case x if x < 0 ⇒
             val Left: Boolean = (big_alpha.compare(big_X) < 0) ∧ (big_X.compare(CHORDSIZE) < 0)
             val Right: Boolean = (BigInt(0).compare(big_X) < 0) ∧ (big_omega.compare(big_X) >= 0)
             Left ∨ Right
-          case x if 0 < x => (big_alpha.compare(big_X) < 0) ∧ (big_X.compare(big_omega) <= 0)
+          case x if 0 < x ⇒ (big_alpha.compare(big_X) < 0) ∧ (big_X.compare(big_omega) <= 0)
         }
     }
   }
@@ -196,12 +200,12 @@ object TnodeID {
   }
 
   // index of array(0 to size - 1)
-  val fingerIdx2NodeID: Int => nodeID => nodeID = (arrayIndex: Int) => {
+  val fingerIdx2NodeID: Int ⇒ nodeID ⇒ nodeID = (arrayIndex: Int) ⇒ {
     require(arrayIndex >= 0 && arrayIndex <= 159)
     val index = arrayIndex + 1
 
-    { selfID: nodeID =>
-      new nodeID((BigInt(1, selfID.bytes) + BigInt(2).pow(index - 1)).mod(BigInt(2).pow(160)).toByteArray)
+    { selfID: nodeID ⇒
+      new nodeID((BigInt(1, selfID.bytes.toArray) + BigInt(2).pow(index - 1)).mod(BigInt(2).pow(160)).toByteArray.toSeq)
     }
   }
 

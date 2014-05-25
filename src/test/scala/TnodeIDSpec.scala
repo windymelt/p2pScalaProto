@@ -86,10 +86,10 @@ class TnodeIDSpec extends Specification {
     "公式に合う答えを返す" in {
       import scala.util.Random
       val rnd = new Random()
-      for (k <- 0 to 159) {
+      for (k ← 0 to 159) {
         val self = new nodeID(BigInt(2).pow(rnd.nextInt(159)) toByteArray)
         val node = TnodeID.fingerIdx2NodeID(k)(self)
-        BigInt(1, node.bytes) must_== ((BigInt(self.bytes) + BigInt(2).pow(k + 1 - 1)) mod BigInt(2).pow(160))
+        BigInt(1, node.byteArray) must_== ((BigInt(self.byteArray) + BigInt(2).pow(k + 1 - 1)) mod BigInt(2).pow(160))
       }
     }
   }

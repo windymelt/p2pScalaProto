@@ -5,7 +5,7 @@ import akka.actor._
 
 class dummyActor extends Actor {
   def receive = {
-    case everything => println(everything)
+    case everything ⇒ println(everything)
   }
 
   override def postStop = {
@@ -16,12 +16,12 @@ class dummyActor extends Actor {
 
 class dummyWatcher extends Actor {
   def receive = {
-    case ('watch, a: ActorRef) => {
+    case ('watch, a: ActorRef) ⇒ {
       println(s"now watching $a")
       context.watch(a)
     }
-    case ('unwatch, a: ActorRef) => context.unwatch(a)
-    case Terminated(a: ActorRef) => println(s"$a has been terminated")
+    case ('unwatch, a: ActorRef) ⇒ context.unwatch(a)
+    case Terminated(a: ActorRef) ⇒ println(s"$a has been terminated")
   }
 }
 

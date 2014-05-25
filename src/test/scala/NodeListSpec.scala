@@ -15,19 +15,20 @@ class NodeListSpec extends Specification {
 
   val dummyActor = actor("dummy")(new Act {
     become {
-      case anything => // do nothing
+      case anything ⇒ // do nothing
     }
   })
 
   //  val OMEGA = BigInt(2).pow(160)
 
   /** 0-1-2-3-4-5-6-7-_-_-_-_-0 */
-  val nodes: List[idAddress] = (0 to 6) map {
+  val nodes: List[NodeIdentifier] = (0 to 6) map {
     BigInt(_)
   } map {
     _.toByteArray
   } map {
-    idAddress(_, dummyActor)
+    n ⇒
+      idAddress(nodeID(n), dummyActor)
   } toList
 
   val nodelist: NodeList = NodeList(nodes)
@@ -59,19 +60,19 @@ class NodeListSpec extends Specification {
   "nearestSuccessor" should {
 
     "自分が含まれるリスト中では自分を返せる" in {
-      nodelist.nearestSuccessor(nodelist.nodes.list(0)).asNodeID.toBigInt must_== nodelist.nodes.list(0).asNodeID.toBigInt
+      nodelist.nearestSuccessor(nodelist.nodes.list(0)).id.toBigInt must_== nodelist.nodes.list(0).id.toBigInt
     }
 
     "0のNearestSuccessorは1" in {
-      nodelist.remove(0).nearestSuccessor(nodelist.nodes.list(0)).asNodeID.toBigInt must_== nodelist.nodes.list(1).asNodeID.toBigInt
+      nodelist.remove(0).nearestSuccessor(nodelist.nodes.list(0)).id.toBigInt must_== nodelist.nodes.list(1).id.toBigInt
     }
 
     "3のNearestSuccessorは4" in {
-      nodelist.remove(3).nearestSuccessor(nodelist.nodes.list(3)).asNodeID.toBigInt must_== nodelist.nodes.list(4).asNodeID.toBigInt
+      nodelist.remove(3).nearestSuccessor(nodelist.nodes.list(3)).id.toBigInt must_== nodelist.nodes.list(4).id.toBigInt
     }
 
     "6のNearestSuccessorは0" in {
-      nodelist.remove(6).nearestSuccessor(nodelist.nodes.list(6)).asNodeID.toBigInt must_== nodelist.nodes.list(0).asNodeID.toBigInt
+      nodelist.remove(6).nearestSuccessor(nodelist.nodes.list(6)).id.toBigInt must_== nodelist.nodes.list(0).id.toBigInt
     }
 
   }
@@ -99,21 +100,22 @@ class NodeListSpec extends Specification {
 
   "closestPreceedingNode" should {
     "期待通りのノードを返す: 担当するノードの直前のノードを選ぶ" in {
-      val nodes: List[idAddress] = (0 to 100 by 2) map {
+      val nodes: List[NodeIdentifier] = (0 to 100 by 2) map {
         BigInt(_)
       } map {
         _.toByteArray
       } map {
-        idAddress(_, dummyActor)
+        n ⇒
+          idAddress(nodeID(n), dummyActor)
       } toList
 
       val nodelist: NodeList = NodeList(nodes)
 
-      for (n <- 1 to 99 by 2) {
-        nodelist.closestPrecedingNode(new nodeID(BigInt(n).toByteArray))(idAddress(BigInt(n - 2).toByteArray, dummyActor)).asNodeID.toBigInt must_== BigInt(n - 1)
+      for (n ← 1 to 99 by 2) {
+        nodelist.closestPrecedingNode(new nodeID(BigInt(n).toByteArray))(idAddress(nodeID(BigInt(n - 2).toByteArray), dummyActor)).id.toBigInt must_== BigInt(n - 1)
       }
 
-      nodelist.closestPrecedingNode(new nodeID(BigInt(0).toByteArray))(idAddress(BigInt(99).toByteArray, dummyActor)).asNodeID.toBigInt must_== BigInt(100)
+      nodelist.closestPrecedingNode(new nodeID(BigInt(0).toByteArray))(idAddress(nodeID(BigInt(99).toByteArray), dummyActor)).id.toBigInt must_== BigInt(100)
     }
   }
 }

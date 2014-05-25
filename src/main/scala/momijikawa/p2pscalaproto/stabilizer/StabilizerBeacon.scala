@@ -1,7 +1,8 @@
-package momijikawa.p2pscalaproto
+package momijikawa.p2pscalaproto.stabilizer
 
 import akka.actor._
 import akka.event.Logging
+import momijikawa.p2pscalaproto.messages._
 
 /**
  * ノードに定期的に安定化の命令を発します。
@@ -9,7 +10,7 @@ import akka.event.Logging
  * @param message 安定化のトリガとなるメッセージ。
  * @param executionContext 文脈
  */
-class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionContext: akka.dispatch.MessageDispatcher) extends Actor {
+class StabilizerBeacon(chord: ActorRef, message: chordMessage, implicit val executionContext: akka.dispatch.MessageDispatcher) extends Actor {
 
   import scala.concurrent.duration._
   import akka.agent.Agent
@@ -22,13 +23,13 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
    * メッセージを受けると安定化タイマ開始もしくは停止のいずれかの処理を行います。
    */
   def receive = {
-    case m: stabilizeMessage =>
+    case m: stabilizeMessage ⇒
       m match {
-        case StartStabilize => start()
-        case StopStabilize => stop()
-        case StabilizeStatus => sender ! isStarted()
+        case StartStabilize  ⇒ start()
+        case StopStabilize   ⇒ stop()
+        case StabilizeStatus ⇒ sender ! isStarted()
       }
-    case _ => unhandled("unknown message")
+    case _ ⇒ unhandled("unknown message")
   }
 
   /**
@@ -39,11 +40,11 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
   def start() = {
     //scheduler.cancel()
     isStarted() match {
-      case false =>
+      case false ⇒
         log.debug("stabilizer started")
         scheduler = context.system.scheduler.schedule(3 seconds, 5 seconds, chord, message)
         isStarted send true
-      case true => // do nothing
+      case true ⇒ // do nothing
     }
   }
 
@@ -54,11 +55,11 @@ class Stabilizer(chord: ActorRef, message: chordMessage, implicit val executionC
    */
   def stop() = {
     isStarted() match {
-      case true =>
+      case true ⇒
         log.debug("going to stop stabilizer")
         scheduler.cancel()
         isStarted send false
-      case false => // do nothing
+      case false ⇒ // do nothing
     }
   }
 

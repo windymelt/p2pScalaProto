@@ -6,6 +6,9 @@ import scala.collection.immutable.HashMap
 import akka.agent.Agent
 import scalaz._
 import Scalaz._
+import momijikawa.p2pscalaproto.messages._
+import momijikawa.p2pscalaproto.nodeID
+import akka.actor.Terminated
 
 // TODO: timer-control-actorを作るべきでは
 
@@ -14,67 +17,67 @@ import Scalaz._
  * 高速なメッセージパッシングを処理するため、[[akka.actor.Actor]]で構成されています。
  * 通常の利用では直接扱うことはありません。
  */
-class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
+class MessageReceiver(stateAgt: Agent[ChordState], networkCommunicator: NetworkMessaging) extends Actor {
 
   type dataMap = HashMap[Seq[Byte], KVSData]
 
   //(context.system.dispatcher)
 
   val log = Logging(context.system, this)
-  val handler = new ChordController(stateAgt, context, log)
+  val handler = new ChordLogic(stateAgt, context, log, networkCommunicator)
 
   /**
    * 受け取ったメッセージを処理します。
    */
   def receive = {
-    case m: chordMessage => m match {
-      case Stabilize => handler.stabilize()
-      case InitNode(id) =>
+    case m: chordMessage ⇒ m match {
+      case Stabilize ⇒ handler.stabilize()
+      case InitNode(id) ⇒
         handler.init(id, self); sender ! ACK
-      case JoinNode(bootstrapNode) =>
+      case JoinNode(bootstrapNode) ⇒
         log.info("received JoinNode.")
         handler.join(bootstrapNode)
         sender ! ACK
-      case GetData(key) => sender ! handler.loadData(key)
-      case PutData(title, value) => sender ! handler.saveData(title, value)
-      case Serialize => sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
-      case GetStatus => sender ! stateAgt()
-      case Finalize => sender ! handler.finalizeNode()
-      case x => receiveExtension(x, sender)
+      case GetData(key)          ⇒ sender ! handler.loadData(key)
+      case PutData(title, value) ⇒ sender ! handler.saveData(title, value)
+      case Serialize             ⇒ sender ! stateAgt().selfID.map(_.toString) //state.selfID.map(_.toString)
+      case GetStatus             ⇒ sender ! stateAgt()
+      case Finalize              ⇒ sender ! handler.finalizeNode()
+      case x                     ⇒ receiveExtension(x, sender)
     }
-    case m: nodeMessage => m match {
-      case Ping => sender ! PingACK
-      case WhoAreYou => sender ! IdAddressMessage(stateAgt().selfID)
+    case m: nodeMessage ⇒ m match {
+      case Ping      ⇒ sender ! PingACK
+      case WhoAreYou ⇒ sender ! NodeIdentifierMessage(stateAgt().selfID)
       //case FindNode(id: String) => sender ! findNodeAct(new nodeID(id))
-      case FindNode(id: String) =>
+      case FindNode(id: String) ⇒
         log.debug("chordcore: findnode from" + sender.path.toStringWithAddress(sender.path.address))
         handler.findNode(new nodeID(id))
-      case AmIPredecessor(address) => ChordState.checkPredecessor(address, stateAgt)
-      case YourPredecessor => sender ! handler.yourPredecessor
-      case YourSuccessor => sender ! handler.yourSuccessor
-      case Immigration(data) => handler.immigrateData(data)
-      case SetChunk(key, kvp) =>
+      case AmIPredecessor(address) ⇒ handler.checkPredecessor(address)
+      case YourPredecessor         ⇒ sender ! NodeIdentifierMessage(stateAgt().getPredecessor)
+      case YourSuccessor           ⇒ sender ! NodeIdentifierMessage(stateAgt().getNearestSuccessor)
+      case Immigration(data)       ⇒ handler.immigrateData(data)
+      case SetChunk(key, kvp) ⇒
         val saved: Option[Seq[Byte]] = ChordState.putDataToNode(key, kvp, stateAgt)
         //        state = saved._1
         sender ! saved
-      case GetChunk(key) =>
+      case GetChunk(key) ⇒
         log.debug("DHT: getchunk received.")
         if (!stateAgt().dataholder.isDefinedAt(key)) {
           log.info(s"No data for key: ${nodeID(key.toArray)} while Bank: ${
             stateAgt().dataholder.keys.map {
-              key => nodeID(key.toArray)
+              key ⇒ nodeID(key.toArray)
             }.mkString("¥n")
           }")
         } else {
           log.debug(s"found data for ${nodeID(key.toArray)}")
         }
         sender ! stateAgt().dataholder.get(key) // => Option[KVSData] //sender.!?[Array[Byte]](GetChunk(key))
-      case x => receiveExtension(x, sender)
+      case x ⇒ receiveExtension(x, sender)
     }
-    case Terminated(a: ActorRef) =>
+    case Terminated(a: ActorRef) ⇒
       log.info(s"Node terminate detection: ${a.toString()}")
       handler.unregistNode(a)
-    case x => receiveExtension(x, sender)
+    case x ⇒ receiveExtension(x, sender)
   }
 
   /**
@@ -84,7 +87,7 @@ class MessageReceiver(stateAgt: Agent[ChordState]) extends Actor {
    * @param context [[akka.actor.ActorContext]]
    */
   def receiveExtension(x: Any, sender: ActorRef)(implicit context: ActorContext) = x match {
-    case m => log.warning(s"unknown message: $m")
+    case m ⇒ log.warning(s"unknown message: $m")
   }
 
   override def preStart() = {

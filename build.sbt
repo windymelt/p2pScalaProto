@@ -21,7 +21,7 @@ libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.2.3",
   "com.typesafe.akka" %% "akka-remote" % "2.2.3",
   "com.typesafe.akka" %% "akka-agent" % "2.2.3",
-  "commons-codec" % "commons-codec" % "1.3",
+  "commons-codec" % "commons-codec" % "1.9",
   "org.scalaz" %% "scalaz-core" % "7.0.0",
   "org.scalaz" %% "scalaz-effect" % "7.0.0",
   "org.scalaz" %% "scalaz-typelevel" % "7.0.0",
