@@ -37,8 +37,7 @@ case class NodeList(nodes: scalaz.NonEmptyList[idAddress]) {
         Some(lis.filter(id_query.belongs_between(id_self).and(_))
           .minBy {
             distanceFrom(_) to id_query
-          }
-        )
+          })
     }
   }
 
