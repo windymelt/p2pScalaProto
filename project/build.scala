@@ -10,7 +10,7 @@ object P2PScalaProto extends Build {
   val Organization = "momijikawa"
   val Name = "p2pscalaproto"
   val Version = "0.2.16" 
-  val ScalaVersion = "2.10.2"    
+  val ScalaVersion = "2.10.2" // Scalaバージョンは固定する
 
   // << groupId >> %%  << artifactId >> % << version >>
   lazy val LibraryDependencies = Seq(
@@ -36,6 +36,7 @@ object P2PScalaProto extends Build {
     name := Name,
     version := Version,
     scalaVersion := ScalaVersion,
+    resolvers += DefaultMavenRepository,
     resolvers += Classpaths.typesafeReleases,
     resolvers += "Momijikawa Maven repository on GitHub" at "http://windymelt.github.io/repo/",
     libraryDependencies ++= LibraryDependencies,
