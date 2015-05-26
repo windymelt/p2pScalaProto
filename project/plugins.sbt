@@ -2,6 +2,8 @@ resolvers += "sbt-idea-repo" at "http://mpeltonen.github.com/maven/"
 
 resolvers += "sonatype-releases" at "https://oss.sonatype.org/content/repositories/releases/"
 
+resolvers += "bintray-typesafe-repo" at "https://dl.bintray.com/typesafe/maven-releases/"
+
 addSbtPlugin("com.typesafe.play" % "sbt-plugin" % "2.2.1")
 
 addSbtPlugin("com.github.mpeltonen" % "sbt-idea" % "1.5.2")

@@ -31,13 +31,16 @@ object P2PScalaProto extends Build {
  
   lazy val projectSettings = Seq(
     parallelExecution in Test := false,
+    testOptions in Test += Tests.Argument(TestFrameworks.Specs2, "junitxml", "console"),
     organization := Organization,
     name := Name,
     version := Version,
     scalaVersion := ScalaVersion,
     resolvers += Classpaths.typesafeReleases,
     resolvers += "Momijikawa Maven repository on GitHub" at "http://windymelt.github.io/repo/",
-    libraryDependencies ++= LibraryDependencies
+    libraryDependencies ++= LibraryDependencies,
+    initialCommands := "import momijikawa.p2pscalaproto._",
+    initialCommands in console := "import scalaz._, Scalaz._"
   )
 
   lazy val project = Project(
@@ -52,7 +55,3 @@ object P2PScalaProto extends Build {
   )
 }
 
-// initialCommands := "import momijikawa.p2pscalaproto._"
-// initialCommands in console := "import scalaz._, Scalaz._"
-// testOptions in Test += Tests.Argument(TestFrameworks.Specs2, "junitxml", "console")
-// parallelExecution in Test := false
