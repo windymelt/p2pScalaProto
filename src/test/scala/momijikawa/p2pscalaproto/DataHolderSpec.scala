@@ -1,4 +1,4 @@
-package momijikawa.p2pscalaproto.test
+package momijikawa.p2pscalaproto
 
 import momijikawa.p2pscalaproto._
 import org.specs2.mutable._
