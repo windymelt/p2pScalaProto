@@ -40,6 +40,7 @@ object P2PScalaProto extends Build {
     scalaVersion := ScalaVersion,
     resolvers += DefaultMavenRepository,
     resolvers += Classpaths.typesafeReleases,
+    resolvers += "Scalaz Bintray Repo" at "https://dl.bintray.com/scalaz/releases",
     resolvers += "Momijikawa Maven repository on GitHub" at "http://windymelt.github.io/repo/",
     libraryDependencies ++= LibraryDependencies,
     initialCommands := "import momijikawa.p2pscalaproto._",
