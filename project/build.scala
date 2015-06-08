@@ -23,12 +23,14 @@ object P2PScalaProto extends Build {
     "org.scalaz" %% "scalaz-effect"             % ScalazVersion,
     "org.scalaz" %% "scalaz-typelevel"          % ScalazVersion,
     "org.scalaz" %% "scalaz-scalacheck-binding" % ScalazVersion % "test",
+    "org.scalacheck" %% "scalacheck" % "1.12.2" % "test",
     "org.specs2" %% "specs2-core" % "3.1" % "test",
+    "org.specs2" %% "specs2-mock" % "3.1" % "test",
+    "org.specs2" %% "specs2-scalacheck" % "3.1" % "test",
     "commons-codec" % "commons-codec" % "1.9",
     "com.psyonik" %% "psyonik-upnp" % "0.0.1-SNAPSHOT",
     "org.pegdown" % "pegdown" % "1.0.2",
-    "junit" % "junit" % "latest.integration" % "test",
-    "org.mockito" % "mockito-all" % "1.9.5"
+    "junit" % "junit" % "latest.integration" % "test"
   )
  
   lazy val projectSettings = Seq(

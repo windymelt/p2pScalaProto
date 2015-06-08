@@ -91,6 +91,8 @@ class TnodeIDSpec extends Specification {
         val node = TnodeID.fingerIdx2NodeID(k)(self)
         BigInt(1, node.bytes) must_== ((BigInt(self.bytes) + BigInt(2).pow(k + 1 - 1)) mod BigInt(2).pow(160))
       }
+
+      "Specs2はスコープの終わりで何か判定せなあかんらしい" must startWith("Specs2")
     }
   }
 }
