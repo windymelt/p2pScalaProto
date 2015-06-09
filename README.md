@@ -1,7 +1,8 @@
 P2PScalaProto
 =============
-A Chord DHT written in Scala using Akka
-
+A Chord DHT written in Scala using Akka  
+[![Build Status](https://travis-ci.org/Hiroyuki-Nagata/p2pScalaProto.svg?branch=master)](https://travis-ci.org/Hiroyuki-Nagata/p2pScalaProto)
+  
 License
 -------
 See LICENSE. This software is licensed under the **Modified BSD License --- aka 3-clause BSD license**.
@@ -13,7 +14,7 @@ Installing
 Generally you do not have to install this software manually: you can use sbt and specify dependency as below.
 
 ```
-libraryDependencies +=   "momijikawa" %% "p2pscalaproto" % "0.2.16"
+libraryDependencies +=   "momijikawa" %% "p2pscalaproto" % "0.3.0"
 ```
 
 ###If you are to install manually

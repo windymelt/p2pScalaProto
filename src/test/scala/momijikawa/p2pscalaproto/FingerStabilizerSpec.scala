@@ -1,7 +1,5 @@
 package momijikawa.p2pscalaproto
 
-import momijikawa.p2pscalaproto.IdAddressMessage
-import momijikawa.p2pscalaproto.nodeID
 import org.specs2.mutable._
 import org.specs2.mock._
 import org.specs2.matcher._
@@ -18,10 +16,10 @@ import org.scalacheck._
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
-class fingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
+class FingerStabilizerSpec extends Specification with Mockito with ScalaCheck {
   sequential
 
-  implicit val system = ActorSystem("fingerStabilizerSpec")
+  implicit val system = ActorSystem("FingerStabilizerSpec")
 
   val dummyActor = actor("dummy")(new Act {
     become {
