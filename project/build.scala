@@ -9,7 +9,7 @@ object P2PScalaProto extends Build {
 
   val Organization = "momijikawa"
   val Name = "p2pscalaproto"
-  val Version       = "0.3.0" 
+  val Version       = "0.3.1" 
   val ScalaVersion  = "2.10.4"
   val ScalazVersion = "7.1.1"
   val AkkaVersion   = "2.2.3"
