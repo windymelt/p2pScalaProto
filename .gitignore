@@ -9,6 +9,6 @@ target/*
 project/target/*
 project/project/target/*
 .ensime
-.ensime_lucene/
+.ensime_*
 .idea/
 .idea_modules/
